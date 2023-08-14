@@ -1438,26 +1438,31 @@ class ExpiringString(collections.UserString):
 
 
 async def _get_info(session: ClientSession) -> Tuple[Dict[str, Any], str]:
-    for _ in range(3):
-        try:
-            async with session.post('https://cordapi.dolfi.es/api/v2/properties/web', timeout=5) as resp:
-                json = await resp.json()
-                return json['properties'], json['encoded']
-        except Exception:
-            continue
+    # Example of the response from the URL used: {"browser":{"os":{"type":"Windows","version":"10"},"type":"Chrome","user_agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36","version":"115.0.0.0"},"client":{"build_hash":"958c14cce43dc94338a86831f32e7783916c73e7","build_number":218604,"release_channel":"stable","type":"web","version":null}}
+    # Seems like there's no 'properties' nor 'encoded'. Exception will be thrown anyways so might as well skip
+    # for _ in range(3):
+    #     try:
+    #         async with session.post('https://cordapi.dolfi.es/api/v2/properties/web', timeout=5) as resp:
+    #             json = await resp.json()
+    #             return json['properties'], json['encoded']
+    #     except Exception:
+    #         continue
 
-    _log.warning('Info API down. Falling back to manual fetching...')
+    # _log.warning('Info API down. Falling back to manual fetching...')
+    _log.info('Building super properties...')
     ua = await _get_user_agent(session)
     bn = await _get_build_number(session)
     bv = _get_browser_version(ua)
 
     properties = {
         'os': 'Windows',
-        'browser': 'Chrome',
+        # 'browser': 'Chrome',
+        'browser': 'Discord Client',
         'device': '',
         'browser_user_agent': ua,
         'browser_version': bv,
         'os_version': '10',
+        'os_arch': 'x64',
         'referrer': '',
         'referring_domain': '',
         'referrer_current': '',
