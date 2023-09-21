@@ -37,7 +37,7 @@ from .asset import Asset
 from .utils import MISSING
 from .user import BaseUser, User, _UserTag
 from .permissions import Permissions
-from .enums import RelationshipAction, Status, try_enum
+from .enums import Status, try_enum
 from .errors import ClientException
 from .colour import Colour
 from .object import Object
@@ -60,7 +60,7 @@ if TYPE_CHECKING:
     from .guild import Guild
     from .profile import MemberProfile
     from .types.activity import (
-        PartialPresenceUpdate,
+        BasePresenceUpdate,
     )
     from .types.member import (
         MemberWithUser as MemberWithUserPayload,
@@ -304,7 +304,7 @@ class Member(discord.abc.Messageable, discord.abc.Connectable, _UserTag):
         block: Callable[[], Awaitable[None]]
         unblock: Callable[[], Awaitable[None]]
         remove_friend: Callable[[], Awaitable[None]]
-        mutual_guilds: List[Guild]
+        fetch_mutual_friends: Callable[[], Awaitable[List[User]]]
         public_flags: PublicUserFlags
         banner: Optional[Asset]
         accent_color: Optional[Colour]
@@ -389,7 +389,7 @@ class Member(discord.abc.Messageable, discord.abc.Connectable, _UserTag):
         self._user = member._user
         return self
 
-    def _update(self, data: GuildMemberUpdateEvent) -> Optional[Member]:
+    def _update(self, data: Union[GuildMemberUpdateEvent, MemberWithUserPayload]) -> Optional[Member]:
         old = Member._copy(self)
 
         # Some changes are optional
@@ -416,7 +416,7 @@ class Member(discord.abc.Messageable, discord.abc.Connectable, _UserTag):
             return old
 
     def _presence_update(
-        self, data: PartialPresenceUpdate, user: Union[PartialUserPayload, Tuple[()]]
+        self, data: BasePresenceUpdate, user: Union[PartialUserPayload, Tuple[()]]
     ) -> Optional[Tuple[User, User]]:
         self._presence = self._state.create_presence(data)
         return self._user._update_self(user)
@@ -1107,20 +1107,6 @@ class Member(discord.abc.Messageable, discord.abc.Connectable, _UserTag):
         if self.timed_out_until is not None:
             return utils.utcnow() < self.timed_out_until
         return False
-
-    async def send_friend_request(self) -> None:
-        """|coro|
-
-        Sends the member a friend request.
-
-        Raises
-        -------
-        Forbidden
-            Not allowed to send a friend request to the member.
-        HTTPException
-            Sending the friend request failed.
-        """
-        await self._state.http.add_relationship(self._user.id, action=RelationshipAction.send_friend_request)
 
     async def profile(
         self,

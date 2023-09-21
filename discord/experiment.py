@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Dict, Final, Iterator, List, Optional, Sequence, Tuple, Union
 
+from .enums import HubType, try_enum
 from .metadata import Metadata
 from .utils import SequenceProxy, SnowflakeList, murmurhash32
 
@@ -202,13 +203,12 @@ class ExperimentFilters:
         if ids_filter is not None:
             return ids_filter.guild_ids
 
-    # TODO: Pending hub implementation
-    # @property
-    # def hub_types(self) -> Optional[List[HubType]]:
-    #     """Optional[List[:class:`HubType`]]: The hub types that are eligible for the population."""
-    #     hub_types_filter = self.options.guild_hub_types
-    #     if hub_types_filter is not None:
-    #         return [try_enum(HubType, hub_type) for hub_type in hub_types_filter.guild_hub_types]
+    @property
+    def hub_types(self) -> Optional[List[HubType]]:
+        """Optional[List[:class:`HubType`]]: The Student Hub types that are eligible for the population."""
+        hub_types_filter = self.options.guild_hub_types
+        if hub_types_filter is not None:
+            return [try_enum(HubType, hub_type) for hub_type in hub_types_filter.guild_hub_types]
 
     @property
     def range_by_hash(self) -> Optional[Tuple[int, int]]:
@@ -265,12 +265,11 @@ class ExperimentFilters:
             if guild.id not in ids:
                 return False
 
-        # TODO: Pending hub implementation
-        # hub_types = self.hub_types
-        # if hub_types is not None:
-        #     # Guild must be in the list of hub types
-        #     if not guild.hub_type or guild.hub_type not in hub_types:
-        #         return False
+        hub_types = self.hub_types
+        if hub_types is not None:
+            # Guild must be a hub in the list of hub types
+            if not guild.hub_type or guild.hub_type not in hub_types:
+                return False
 
         range_by_hash = self.range_by_hash
         if range_by_hash is not None:
@@ -522,6 +521,8 @@ class GuildExperiment:
         The experiment this experiment depends on, if any.
     aa_mode: :class:`bool`
         Whether the experiment is in A/A mode.
+    trigger_debugging:
+        Whether experiment analytics trigger debugging is enabled.
     """
 
     __slots__ = (
@@ -534,6 +535,7 @@ class GuildExperiment:
         'overrides_formatted',
         'holdout',
         'aa_mode',
+        'trigger_debugging',
     )
 
     def __init__(self, *, state: ConnectionState, data: GuildExperimentPayload):
@@ -547,6 +549,8 @@ class GuildExperiment:
             holdout_name,
             holdout_bucket,
             aa_mode,
+            trigger_debugging,
+            *_,
         ) = data
 
         self._state = state
@@ -564,6 +568,7 @@ class GuildExperiment:
             else None
         )
         self.aa_mode: bool = aa_mode == 1
+        self.trigger_debugging: bool = trigger_debugging == 1
 
     def __repr__(self) -> str:
         return f'<GuildExperiment hash={self.hash}{f" name={self._name!r}" if self._name else ""}>'
@@ -723,6 +728,8 @@ class UserExperiment:
         The internal population group for the user.
     aa_mode: :class:`bool`
         Whether the experiment is in A/A mode.
+    trigger_debugging:
+        Whether experiment analytics trigger debugging is enabled.
     """
 
     __slots__ = (
@@ -735,10 +742,11 @@ class UserExperiment:
         'population',
         '_result',
         'aa_mode',
+        'trigger_debugging',
     )
 
     def __init__(self, *, state: ConnectionState, data: AssignmentPayload):
-        (hash, revision, bucket, override, population, hash_result, aa_mode) = data
+        (hash, revision, bucket, override, population, hash_result, aa_mode, trigger_debugging, *_) = data
 
         self._state = state
         self._name: Optional[str] = None
@@ -748,7 +756,8 @@ class UserExperiment:
         self.override: int = override
         self.population: int = population
         self._result: int = hash_result
-        self.aa_mode: bool = True if aa_mode == 1 else False
+        self.aa_mode: bool = aa_mode == 1
+        self.trigger_debugging: bool = trigger_debugging == 1
 
     def __repr__(self) -> str:
         return f'<UserExperiment hash={self.hash}{f" name={self._name!r}" if self._name else ""} bucket={self.bucket}>'

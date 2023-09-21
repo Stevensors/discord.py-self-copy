@@ -27,6 +27,7 @@ from __future__ import annotations
 from typing import Dict, List, Literal, Optional, TypedDict, Union
 from typing_extensions import NotRequired
 
+from .command import ApplicationCommand
 from .guild import PartialGuild
 from .snowflake import Snowflake
 from .team import Team
@@ -34,40 +35,49 @@ from .user import APIUser, PartialUser
 
 
 class Token(TypedDict):
+    token: str
+
+
+class OptionalToken(TypedDict):
     # Missing if a bot already exists 😭
     token: Optional[str]
 
 
-class BaseApplication(TypedDict):
+class Secret(TypedDict):
+    secret: str
+
+
+class _BaseApplication(TypedDict):
     id: Snowflake
     name: str
     description: str
     icon: Optional[str]
-    cover_image: NotRequired[Optional[str]]
+    cover_image: NotRequired[str]
+    splash: NotRequired[str]
     type: Optional[int]
     primary_sku_id: NotRequired[Snowflake]
     summary: NotRequired[Literal['']]
+    deeplink_uri: NotRequired[str]
+    third_party_skus: NotRequired[List[ThirdPartySKU]]
 
 
-class RoleConnectionApplication(BaseApplication):
+class BaseApplication(_BaseApplication):
     bot: NotRequired[PartialUser]
 
 
 class IntegrationApplication(BaseApplication):
-    bot: NotRequired[APIUser]
     role_connections_verification_url: NotRequired[Optional[str]]
 
 
-class PartialApplication(BaseApplication):
+class PartialApplication(_BaseApplication):
     owner: NotRequired[APIUser]  # Not actually ever present in partial app
     team: NotRequired[Team]
     verify_key: str
-    description: str
-    cover_image: NotRequired[Optional[str]]
     flags: NotRequired[int]
     rpc_origins: NotRequired[List[str]]
     hook: NotRequired[bool]
     overlay: NotRequired[bool]
+    overlay_warn: NotRequired[bool]
     overlay_compatibility_hook: NotRequired[bool]
     terms_of_service_url: NotRequired[str]
     privacy_policy_url: NotRequired[str]
@@ -86,23 +96,34 @@ class PartialApplication(BaseApplication):
     embedded_activity_config: NotRequired[EmbeddedActivityConfig]
     guild: NotRequired[PartialGuild]
     install_params: NotRequired[ApplicationInstallParams]
-    deeplink_uri: NotRequired[str]
+    store_listing_sku_id: NotRequired[Snowflake]
+    executables: NotRequired[List[ApplicationExecutable]]
 
 
 class ApplicationDiscoverability(TypedDict):
     discoverability_state: int
     discovery_eligibility_flags: int
+    bad_commands: List[ApplicationCommand]
 
 
-class Application(PartialApplication, IntegrationApplication, ApplicationDiscoverability):
+InteractionsVersion = Literal[1, 2]
+
+
+class Application(PartialApplication, IntegrationApplication):
+    bot_disabled: NotRequired[bool]
+    bot_quarantined: NotRequired[bool]
     redirect_uris: List[str]
     interactions_endpoint_url: Optional[str]
+    interactions_version: InteractionsVersion
+    interactions_event_types: List[str]
     verification_state: int
     store_application_state: int
     rpc_application_state: int
     creator_monetization_state: int
-    role_connections_verification_url: NotRequired[Optional[str]]
-    # GET /applications/{application.id} only
+    discoverability_state: int
+    discovery_eligibility_flags: int
+    monetization_state: int
+    monetization_eligibility_flags: int
     approximate_guild_count: NotRequired[int]
 
 
@@ -134,6 +155,18 @@ class EULA(TypedDict):
     id: Snowflake
     name: str
     content: str
+
+
+class ApplicationExecutable(TypedDict):
+    name: str
+    os: Literal['win32', 'linux', 'darwin']
+    is_launcher: bool
+
+
+class ThirdPartySKU(TypedDict):
+    distributor: Literal['discord', 'steam', 'twitch', 'uplay', 'battlenet', 'origin', 'gog', 'epic', 'google_play']
+    id: Optional[str]
+    sku_id: Optional[str]
 
 
 class BaseAchievement(TypedDict):
@@ -226,16 +259,15 @@ class GlobalActivityStatistics(TypedDict):
 
 
 EmbeddedActivityPlatform = Literal['web', 'android', 'ios']
-EmbeddedActivityPlatformLabelType = Literal[0, 1, 2]
-EmbedddedActivityPlatformReleasePhase = Literal[
+EmbeddedActivityPlatformReleasePhase = Literal[
     'in_development', 'activities_team', 'employee_release', 'soft_launch', 'global_launch'
 ]
 
 
 class EmbeddedActivityPlatformConfig(TypedDict):
-    label_type: EmbeddedActivityPlatformLabelType
+    label_type: Literal[0, 1, 2]
     label_until: Optional[str]
-    release_phase: EmbedddedActivityPlatformReleasePhase
+    release_phase: EmbeddedActivityPlatformReleasePhase
 
 
 class EmbeddedActivityConfig(TypedDict):
@@ -282,7 +314,7 @@ class PartialRoleConnection(TypedDict):
 
 
 class RoleConnection(PartialRoleConnection):
-    application: RoleConnectionApplication
+    application: BaseApplication
     application_metadata: List[RoleConnectionMetadata]
 
 

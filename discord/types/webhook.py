@@ -38,6 +38,11 @@ class SourceGuild(TypedDict):
     icon: str
 
 
+class SourceChannel(TypedDict):
+    id: int
+    name: str
+
+
 WebhookType = Literal[1, 2, 3]
 
 

@@ -1,7 +1,7 @@
 """
 The MIT License (MIT)
 
-Copyright (c) 2015-present Rapptz
+Copyright (c) 2021-present Dolfies
 
 Permission is hereby granted, free of charge, to any person obtaining a
 copy of this software and associated documentation files (the "Software"),
@@ -22,54 +22,36 @@ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 """
 
-from typing import Optional, TypedDict
+from __future__ import annotations
 
-from .activity import BasePresenceUpdate
-from .snowflake import SnowflakeList
-from .user import PartialUser
-
-
-class Nickname(TypedDict):
-    nick: str
+from typing import Dict, List, Literal, Optional, TypedDict, Union
+from typing_extensions import NotRequired
 
 
-class PartialMember(TypedDict):
-    roles: SnowflakeList
-    joined_at: str
-    deaf: bool
-    mute: bool
-    flags: int
+class FormError(TypedDict):
+    code: str
+    message: str
 
 
-class Member(PartialMember, total=False):
-    avatar: Optional[str]
-    user: PartialUser
-    nick: str
-    premium_since: Optional[str]
-    pending: bool
-    communication_disabled_until: str
+class FormErrorWrapper(TypedDict):
+    _errors: List[FormError]
 
 
-class _OptionalMemberWithUser(PartialMember, total=False):
-    avatar: Optional[str]
-    nick: str
-    premium_since: Optional[str]
-    pending: bool
-    communication_disabled_until: str
+FormErrors = Union[FormErrorWrapper, Dict[str, 'FormErrors']]
 
 
-class MemberWithUser(_OptionalMemberWithUser):
-    user: PartialUser
+class Error(TypedDict):
+    code: int
+    message: str
+    errors: NotRequired[FormErrors]
 
 
-class MemberWithPresence(MemberWithUser):
-    presence: BasePresenceUpdate
+CaptchaService = Literal['hcaptcha', 'recaptcha']
 
 
-class PrivateMember(MemberWithUser):
-    bio: str
-    banner: Optional[str]
-
-
-class UserWithMember(PartialUser, total=False):
-    member: _OptionalMemberWithUser
+class CaptchaRequired(TypedDict):
+    captcha_key: List[str]
+    captcha_service: CaptchaService
+    captcha_sitekey: Optional[str]
+    captcha_rqdata: NotRequired[str]
+    captcha_rqtoken: NotRequired[str]

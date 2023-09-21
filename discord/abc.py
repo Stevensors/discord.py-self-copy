@@ -60,6 +60,7 @@ from .voice_client import VoiceClient, VoiceProtocol
 from .sticker import GuildSticker, StickerItem
 from .settings import ChannelSettings
 from .commands import ApplicationCommand, BaseCommand, SlashCommand, UserCommand, MessageCommand, _command_factory
+from .flags import InviteFlags
 from . import utils
 
 __all__ = (
@@ -103,7 +104,7 @@ if TYPE_CHECKING:
         OverwriteType,
     )
     from .types.embed import EmbedType
-    from .types.message import MessageSearchAuthorType, MessageSearchHasType
+    from .types.message import MessageSearchAuthorType, MessageSearchHasType, PartialMessage as PartialMessagePayload
     from .types.snowflake import (
         SnowflakeList,
     )
@@ -261,7 +262,7 @@ async def _handle_commands(
         prev_cursor = cursor
         cursor = data['cursor'].get('next')
         cmds = data['application_commands']
-        apps: Dict[int, dict] = {int(app['id']): app for app in data.get('applications') or []}
+        apps = {int(app['id']): state.create_integration_application(app) for app in data.get('applications') or []}
 
         for cmd in cmds:
             # Handle faked parameters
@@ -279,8 +280,8 @@ async def _handle_commands(
             except ValueError:
                 pass
 
-            cmd['application'] = apps.get(int(cmd['application_id']))
-            yield cls(state=state, data=cmd, channel=channel, target=target)
+            application = apps.get(int(cmd['application_id']))
+            yield cls(state=state, data=cmd, channel=channel, target=target, application=application)
 
         cmd_ids = None
         if application_id or len(cmds) < min(limit if limit else 25, 25) or len(cmds) == limit == 25:
@@ -312,14 +313,39 @@ async def _handle_message_search(
     oldest_first: bool = False,
     most_relevant: bool = False,
 ) -> AsyncIterator[Message]:
+    from .channel import PartialMessageable  # circular import
+
     if limit is not None and limit < 0:
         raise ValueError('limit must be greater than or equal to 0')
     if offset < 0:
         raise ValueError('offset must be greater than or equal to 0')
 
+    _channels = {c.id: c for c in channels} if channels else {}
+
+    # Guild channels must go through the guild search endpoint
     _state = destination._state
-    endpoint = _state.http.search_channel if isinstance(destination, Messageable) else _state.http.search_guild
-    entity_id = (await destination._get_channel()).id if isinstance(destination, Messageable) else destination.id
+    endpoint = _state.http.search_guild
+    if isinstance(destination, Messageable):
+        channel = await destination._get_channel()
+        _channels[channel.id] = channel
+        if isinstance(channel, PrivateChannel):
+            endpoint = _state.http.search_channel
+            entity_id = channel.id
+        else:
+            channels = [channel]
+            entity_id = getattr(channel.guild, 'id', getattr(channel, 'guild_id', None))
+    else:
+        entity_id = destination.id
+
+    if not entity_id:
+        raise ValueError('Could not resolve channel guild ID')
+
+    def _resolve_channel(message: PartialMessagePayload, /):
+        _channel, _ = _state._get_guild_channel(message)
+        if isinstance(_channel, PartialMessageable) and _channel.id in _channels:
+            return _channels[_channel.id]
+        return _channel
+
     payload = {}
 
     if isinstance(before, datetime):
@@ -409,7 +435,7 @@ async def _handle_message_search(
             if channel_id in threads:
                 raw_message['thread'] = threads[channel_id]
 
-            channel, _ = _state._get_guild_channel(raw_message)
+            channel = _resolve_channel(raw_message)
             yield _state.create_message(channel=channel, data=raw_message, search_result=data)  # type: ignore
 
 
@@ -1450,7 +1476,7 @@ class GuildChannel:
         max_uses: int = 0,
         temporary: bool = False,
         unique: bool = True,
-        validate: Optional[Union[Invite, str]] = None,
+        guest: bool = False,
         target_type: Optional[InviteTarget] = None,
         target_user: Optional[User] = None,
         target_application: Optional[Snowflake] = None,
@@ -1460,6 +1486,10 @@ class GuildChannel:
         Creates an instant invite from a text or voice channel.
 
         You must have :attr:`~discord.Permissions.create_instant_invite` to do this.
+
+        .. versionchanged:: 2.1
+
+            The ``validate`` parameter has been removed.
 
         Parameters
         ------------
@@ -1472,30 +1502,28 @@ class GuildChannel:
         temporary: :class:`bool`
             Denotes that the invite grants temporary membership
             (i.e. they get kicked after they disconnect). Defaults to ``False``.
+        guest: :class:`bool`
+            Denotes that the invite is a guest invite.
+            Guest invites grant temporary membership for the purposes of joining a voice channel.
+            Defaults to ``False``.
+
+            .. versionadded:: 2.1
         unique: :class:`bool`
-            Indicates if a unique invite URL should be created. Defaults to True.
+            Indicates if a unique invite URL should be created. Defaults to ``True``.
             If this is set to ``False`` then it will return a previously created
             invite.
-        validate: Union[:class:`.Invite`, :class:`str`]
-            The existing channel invite to validate and return for reuse.
-            If this invite is invalid, a new invite will be created according to the parameters and returned.
-
-            .. versionadded:: 2.0
         target_type: Optional[:class:`~discord.InviteTarget`]
             The type of target for the voice channel invite, if any.
 
             .. versionadded:: 2.0
-
         target_user: Optional[:class:`~discord.User`]
             The user whose stream to display for this invite, required if ``target_type`` is :attr:`.InviteTarget.stream`. The user must be streaming in the channel.
 
             .. versionadded:: 2.0
-
         target_application:: Optional[:class:`~discord.Application`]
             The embedded application for the invite, required if ``target_type`` is :attr:`.InviteTarget.embedded_application`.
 
             .. versionadded:: 2.0
-
         reason: Optional[:class:`str`]
             The reason for creating this invite. Shows up on the audit log.
 
@@ -1517,6 +1545,9 @@ class GuildChannel:
             raise ValueError('target_type parameter must be InviteTarget.stream, or InviteTarget.embedded_application')
         if target_type == InviteTarget.unknown:
             target_type = None
+        flags = InviteFlags()
+        if guest:
+            flags.guest = True
 
         data = await self._state.http.create_invite(
             self.id,
@@ -1525,10 +1556,10 @@ class GuildChannel:
             max_uses=max_uses,
             temporary=temporary,
             unique=unique,
-            validate=utils.resolve_invite(validate).code if validate else None,
             target_type=target_type.value if target_type else None,
             target_user_id=target_user.id if target_user else None,
             target_application_id=target_application.id if target_application else None,
+            flags=flags.value,
         )
         return Invite.from_incomplete(data=data, state=self._state)
 
@@ -2336,6 +2367,8 @@ class Messageable:
             You do not have permissions to search the channel's messages.
         ~discord.HTTPException
             The request to search messages failed.
+        ValueError
+            Could not resolve the channel's guild ID.
 
         Yields
         -------

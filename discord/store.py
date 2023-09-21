@@ -679,8 +679,6 @@ class StoreListing(Hashable):
         return f'<StoreListing id={self.id} summary={self.summary!r} sku={self.sku!r}>'
 
     def _update(self, data: StoreListingPayload, application: Optional[PartialApplication] = None) -> None:
-        from .guild import Guild
-
         state = self._state
 
         self.summary, self.summary_localizations = _parse_localizations(data, 'summary')
@@ -693,7 +691,7 @@ class StoreListing(Hashable):
         self.child_skus: List[SKU] = [SKU(data=sku, state=state) for sku in data.get('child_skus', [])]
         self.alternative_skus: List[SKU] = [SKU(data=sku, state=state) for sku in data.get('alternative_skus', [])]
         self.entitlement_branch_id: Optional[int] = _get_as_snowflake(data, 'entitlement_branch_id')
-        self.guild: Optional[Guild] = Guild(data=data['guild'], state=state) if 'guild' in data else None
+        self.guild: Optional[Guild] = state.create_guild(data['guild']) if 'guild' in data else None
         self.published: bool = data.get('published', True)
         self.staff_note: Optional[StoreNote] = (
             StoreNote(data=data['staff_notes'], state=state) if 'staff_notes' in data else None
@@ -767,15 +765,15 @@ class StoreListing(Hashable):
         ----------
         summary: Optional[:class:`str`]
             The summary of the store listing.
-        summary_localizations: Dict[:class:`Locale`, :class:`str`]
+        summary_localizations: Mapping[:class:`Locale`, :class:`str`]
             The summary of the store listing localized to different languages.
         description: Optional[:class:`str`]
             The description of the store listing.
-        description_localizations: Dict[:class:`Locale`, :class:`str`]
+        description_localizations: Mapping[:class:`Locale`, :class:`str`]
             The description of the store listing localized to different languages.
         tagline: Optional[:class:`str`]
             The tagline of the store listing.
-        tagline_localizations: Dict[:class:`Locale`, :class:`str`]
+        tagline_localizations: Mapping[:class:`Locale`, :class:`str`]
             The tagline of the store listing localized to different languages.
         child_skus: List[:class:`SKU`]
             The child SKUs of the store listing.
@@ -1326,21 +1324,21 @@ class SKU(Hashable):
         -----------
         name: :class:`str`
             The SKU's name.
-        name_localizations: Dict[:class:`Locale`, :class:`str`]
+        name_localizations: Mapping[:class:`Locale`, :class:`str`]
             The SKU's name localized to other languages.
         legal_notice: Optional[:class:`str`]
             The SKU's legal notice.
-        legal_notice_localizations: Dict[:class:`Locale`, :class:`str`]
+        legal_notice_localizations: Mapping[:class:`Locale`, :class:`str`]
             The SKU's legal notice localized to other languages.
         price_tier: Optional[:class:`int`]
             The price tier of the SKU.
             This is the base price in USD that other currencies will be calculated from.
-        price_overrides: Dict[:class:`str`, :class:`int`]
+        price_overrides: Mapping[:class:`str`, :class:`int`]
             A mapping of currency to price. These prices override the base price tier.
         sale_price_tier: Optional[:class:`int`]
             The sale price tier of the SKU.
             This is the base sale price in USD that other currencies will be calculated from.
-        sale_price_overrides: Dict[:class:`str`, :class:`int`]
+        sale_price_overrides: Mapping[:class:`str`, :class:`int`]
             A mapping of currency to sale price. These prices override the base sale price tier.
         dependent_sku: Optional[:class:`SKU`]
             The ID of the SKU that this SKU is dependent on.
@@ -1538,15 +1536,15 @@ class SKU(Hashable):
         ----------
         summary: :class:`str`
             The summary of the store listing.
-        summary_localizations: Optional[Dict[:class:`Locale`, :class:`str`]]
+        summary_localizations: Optional[Mapping[:class:`Locale`, :class:`str`]]
             The summary of the store listing localized to different languages.
         description: :class:`str`
             The description of the store listing.
-        description_localizations: Optional[Dict[:class:`Locale`, :class:`str`]]
+        description_localizations: Optional[Mapping[:class:`Locale`, :class:`str`]]
             The description of the store listing localized to different languages.
         tagline: Optional[:class:`str`]
             The tagline of the store listing.
-        tagline_localizations: Optional[Dict[:class:`Locale`, :class:`str`]]
+        tagline_localizations: Optional[Mapping[:class:`Locale`, :class:`str`]]
             The tagline of the store listing localized to different languages.
         child_skus: Optional[List[:class:`SKU`]]
             The child SKUs of the store listing.

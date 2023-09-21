@@ -24,7 +24,7 @@ DEALINGS IN THE SOFTWARE.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import discord.abc
 from .asset import Asset
@@ -598,6 +598,27 @@ class BaseUser(_UserTag):
             with_mutual_friends=with_mutual_friends,
         )
 
+    async def fetch_mutual_friends(self) -> List[User]:
+        """|coro|
+
+        Fetches mutual friends with the user.
+
+        .. versionadded:: 2.1
+
+        Raises
+        -------
+        HTTPException
+            Fetching the mutual friends failed.
+
+        Returns
+        --------
+        List[:class:`User`]
+            The mutual friends with the user.
+        """
+        state = self._state
+        data = await state.http.get_mutual_friends(self.id)
+        return [state.store_user(u) for u in data]
+
 
 class ClientUser(BaseUser):
     """Represents your Discord user.
@@ -776,6 +797,7 @@ class ClientUser(BaseUser):
         self,
         *,
         username: str = MISSING,
+        global_name: Optional[str] = MISSING,
         avatar: Optional[bytes] = MISSING,
         avatar_decoration: Optional[bytes] = MISSING,
         password: str = MISSING,
@@ -812,7 +834,7 @@ class ClientUser(BaseUser):
         -----------
         password: :class:`str`
             The current password for the client's account.
-            Required for everything except avatar, banner, accent_colour, date_of_birth, and bio.
+            Required for everything except avatar, banner, accent_colour, date_of_birth, global_name, and bio.
         new_password: :class:`str`
             The new password you wish to change to.
         email: :class:`str`
@@ -855,6 +877,10 @@ class ClientUser(BaseUser):
             .. note::
 
                 This change cannot be undone and requires you to be in the pomelo rollout.
+
+            .. versionadded:: 2.1
+        global_name: Optional[:class:`str`]
+            The new global display name you wish to change to.
 
             .. versionadded:: 2.1
 
@@ -925,6 +951,9 @@ class ClientUser(BaseUser):
 
         if username is not MISSING:
             args['username'] = username
+
+        if global_name is not MISSING:
+            args['global_name'] = global_name
 
         if discriminator is not MISSING:
             if self.is_pomelo():
@@ -1149,4 +1178,4 @@ class User(BaseUser, discord.abc.Connectable, discord.abc.Messageable):
         HTTPException
             Sending the friend request failed.
         """
-        await self._state.http.send_friend_request(self.name, self.discriminator)
+        await self._state.http.add_relationship(self.id, action=RelationshipAction.send_friend_request)

@@ -25,20 +25,7 @@ DEALINGS IN THE SOFTWARE.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    AsyncIterator,
-    Collection,
-    List,
-    Literal,
-    Mapping,
-    Optional,
-    Sequence,
-    Tuple,
-    Union,
-    overload,
-)
+from typing import TYPE_CHECKING, Any, AsyncIterator, Collection, List, Mapping, Optional, Sequence, Tuple, Union, overload
 from urllib.parse import quote
 
 from . import utils
@@ -52,9 +39,12 @@ from .enums import (
     ApplicationType,
     ApplicationVerificationState,
     Distributor,
+    EmbeddedActivityLabelType,
     EmbeddedActivityOrientation,
     EmbeddedActivityPlatform,
+    EmbeddedActivityReleasePhase,
     Locale,
+    OperatingSystem,
     RPCApplicationState,
     StoreApplicationState,
     UserFlags,
@@ -72,6 +62,8 @@ from .utils import _bytes_to_base64_data, _parse_localizations
 if TYPE_CHECKING:
     from datetime import date
 
+    from typing_extensions import Self
+
     from .abc import Snowflake, SnowflakeTime
     from .enums import SKUAccessLevel, SKUFeature, SKUGenre, SKUType
     from .file import File
@@ -84,6 +76,7 @@ if TYPE_CHECKING:
         Achievement as AchievementPayload,
         ActivityStatistics as ActivityStatisticsPayload,
         Application as ApplicationPayload,
+        ApplicationExecutable as ApplicationExecutablePayload,
         ApplicationInstallParams as ApplicationInstallParamsPayload,
         Asset as AssetPayload,
         BaseApplication as BaseApplicationPayload,
@@ -91,10 +84,14 @@ if TYPE_CHECKING:
         Build as BuildPayload,
         Company as CompanyPayload,
         EmbeddedActivityConfig as EmbeddedActivityConfigPayload,
+        EmbeddedActivityPlatform as EmbeddedActivityPlatformValues,
+        EmbeddedActivityPlatformConfig as EmbeddedActivityPlatformConfigPayload,
         GlobalActivityStatistics as GlobalActivityStatisticsPayload,
+        InteractionsVersion,
         Manifest as ManifestPayload,
         ManifestLabel as ManifestLabelPayload,
         PartialApplication as PartialApplicationPayload,
+        ThirdPartySKU as ThirdPartySKUPayload,
         UnverifiedApplication as UnverifiedApplicationPayload,
         WhitelistedUser as WhitelistedUserPayload,
     )
@@ -105,6 +102,7 @@ __all__ = (
     'EULA',
     'Achievement',
     'ThirdPartySKU',
+    'EmbeddedActivityPlatformConfig',
     'EmbeddedActivityConfig',
     'ApplicationBot',
     'ApplicationExecutable',
@@ -326,11 +324,11 @@ class Achievement(Hashable):
         -----------
         name: :class:`str`
             The achievement's name.
-        name_localizations: Dict[:class:`Locale`, :class:`str`]
+        name_localizations: Mapping[:class:`Locale`, :class:`str`]
             The achievement's name localized to other languages.
         description: :class:`str`
             The achievement's description.
-        description_localizations: Dict[:class:`Locale`, :class:`str`]
+        description_localizations: Mapping[:class:`Locale`, :class:`str`]
             The achievement's description localized to other languages.
         icon: :class:`bytes`
             A :term:`py:bytes-like object` representing the new icon.
@@ -412,7 +410,7 @@ class ThirdPartySKU:
 
     Attributes
     -----------
-    application: :class:`PartialApplication`
+    application: Union[:class:`PartialApplication`, :class:`IntegrationApplication`]
         The application that the SKU belongs to.
     distributor: :class:`Distributor`
         The distributor of the SKU.
@@ -424,14 +422,91 @@ class ThirdPartySKU:
 
     __slots__ = ('application', 'distributor', 'id', 'sku_id')
 
-    def __init__(self, *, data: dict, application: PartialApplication):
+    def __init__(self, *, data: ThirdPartySKUPayload, application: Union[PartialApplication, IntegrationApplication]):
         self.application = application
         self.distributor: Distributor = try_enum(Distributor, data['distributor'])
-        self.id: Optional[str] = data.get('id')
-        self.sku_id: Optional[str] = data.get('sku_id')
+        self.id: Optional[str] = data.get('id') or None
+        self.sku_id: Optional[str] = data.get('sku_id') or None
 
     def __repr__(self) -> str:
         return f'<ThirdPartySKU distributor={self.distributor!r} id={self.id!r} sku_id={self.sku_id!r}>'
+
+    @property
+    def _id(self) -> str:
+        return self.id or self.sku_id or ''
+
+    @property
+    def url(self) -> Optional[str]:
+        """:class:`str`: Returns the URL of the SKU, if available.
+
+        .. versionadded:: 2.1
+        """
+        if not self._id:
+            return
+
+        if self.distributor == Distributor.discord:
+            return f'https://discord.com/store/skus/{self._id}'
+        elif self.distributor == Distributor.steam:
+            return f'https://store.steampowered.com/app/{self._id}'
+        elif self.distributor == Distributor.epic_games:
+            return f'https://store.epicgames.com/en-US/p/{self.application.name.replace(" ", "-")}'
+        elif self.distributor == Distributor.google_play:
+            return f'https://play.google.com/store/apps/details?id={self._id}'
+
+
+class EmbeddedActivityPlatformConfig:
+    """Represents an application's embedded activity configuration for a specific platform.
+
+    .. versionadded:: 2.1
+
+    Attributes
+    -----------
+    platform: :class:`EmbeddedActivityPlatform`
+        The platform that the configuration is for.
+    label_type: :class:`EmbeddedActivityLabelType`
+        The current label shown on the activity.
+    label_until: Optional[:class:`datetime.datetime`]
+        When the current label expires.
+    release_phase: :class:`EmbeddedActivityReleasePhase`
+        The current release phase of the activity.
+    """
+
+    __slots__ = ('platform', 'label_type', 'label_until', 'release_phase')
+
+    def __init__(
+        self,
+        platform: EmbeddedActivityPlatform,
+        *,
+        label_type: EmbeddedActivityLabelType = EmbeddedActivityLabelType.none,
+        label_until: Optional[datetime] = None,
+        release_phase: EmbeddedActivityReleasePhase = EmbeddedActivityReleasePhase.global_launch,
+    ):
+        self.platform = platform
+        self.label_type = label_type
+        self.label_until = label_until
+        self.release_phase = release_phase
+
+    @classmethod
+    def from_data(cls, *, data: EmbeddedActivityPlatformConfigPayload, platform: EmbeddedActivityPlatformValues) -> Self:
+        return cls(
+            try_enum(EmbeddedActivityPlatform, platform),
+            label_type=try_enum(EmbeddedActivityLabelType, data.get('label_type', 0)),
+            label_until=utils.parse_time(data.get('label_until')),
+            release_phase=try_enum(EmbeddedActivityReleasePhase, data.get('release_phase', 'global_launch')),
+        )
+
+    def __repr__(self) -> str:
+        return (
+            f'<EmbeddedActivityPlatformConfig platform={self.platform!r} label_type={self.label_type!r} '
+            f'label_until={self.label_until!r} release_phase={self.release_phase!r}>'
+        )
+
+    def to_dict(self) -> EmbeddedActivityPlatformConfigPayload:
+        return {
+            'label_type': self.label_type.value,
+            'label_until': self.label_until.isoformat() if self.label_until else None,
+            'release_phase': self.release_phase.value,
+        }
 
 
 class EmbeddedActivityConfig:
@@ -445,6 +520,10 @@ class EmbeddedActivityConfig:
         The application that the configuration is for.
     supported_platforms: List[:class:`EmbeddedActivityPlatform`]
         A list of platforms that the activity supports.
+    platform_configs: List[:class:`EmbeddedActivityPlatformConfig`]
+        A list of configurations for each supported activity platform.
+
+        .. versionadded:: 2.1
     orientation_lock_state: :class:`EmbeddedActivityOrientation`
         The mobile orientation lock state of the activity.
     tablet_orientation_lock_state: :class:`EmbeddedActivityOrientation`
@@ -464,6 +543,7 @@ class EmbeddedActivityConfig:
     __slots__ = (
         'application',
         'supported_platforms',
+        'platform_configs',
         'orientation_lock_state',
         'tablet_orientation_lock_state',
         'premium_tier_requirement',
@@ -484,6 +564,10 @@ class EmbeddedActivityConfig:
     def _update(self, data: EmbeddedActivityConfigPayload) -> None:
         self.supported_platforms: List[EmbeddedActivityPlatform] = [
             try_enum(EmbeddedActivityPlatform, platform) for platform in data.get('supported_platforms', [])
+        ]
+        self.platform_configs: List[EmbeddedActivityPlatformConfig] = [
+            EmbeddedActivityPlatformConfig.from_data(platform=platform, data=config)
+            for platform, config in data.get('client_platform_config', {}).items()
         ]
         self.orientation_lock_state: EmbeddedActivityOrientation = try_enum(
             EmbeddedActivityOrientation, data.get('default_orientation_lock_state', 0)
@@ -509,6 +593,7 @@ class EmbeddedActivityConfig:
         self,
         *,
         supported_platforms: Collection[EmbeddedActivityPlatform] = MISSING,
+        platform_configs: Collection[EmbeddedActivityPlatformConfig] = MISSING,
         orientation_lock_state: EmbeddedActivityOrientation = MISSING,
         tablet_orientation_lock_state: EmbeddedActivityOrientation = MISSING,
         requires_age_gate: bool = MISSING,
@@ -525,6 +610,10 @@ class EmbeddedActivityConfig:
         -----------
         supported_platforms: List[:class:`EmbeddedActivityPlatform`]
             A list of platforms that the activity supports.
+        platform_configs: List[:class:`EmbeddedActivityPlatformConfig`]
+            A list of configurations for each supported activity platform.
+
+            .. versionadded:: 2.1
         orientation_lock_state: :class:`EmbeddedActivityOrientation`
             The mobile orientation lock state of the activity.
         tablet_orientation_lock_state: :class:`EmbeddedActivityOrientation`
@@ -549,16 +638,21 @@ class EmbeddedActivityConfig:
         """
         data = await self.application._state.http.edit_embedded_activity_config(
             self.application.id,
-            supported_platforms=[str(x) for x in (supported_platforms or [])],
-            orientation_lock_state=int(orientation_lock_state),
-            tablet_orientation_lock_state=int(tablet_orientation_lock_state),
-            requires_age_gate=requires_age_gate,
-            shelf_rank=shelf_rank,
+            supported_platforms=[str(x) for x in (supported_platforms)] if supported_platforms is not MISSING else None,
+            platform_config={c.platform.value: c.to_dict() for c in (platform_configs)}
+            if platform_configs is not MISSING
+            else None,
+            orientation_lock_state=int(orientation_lock_state) if orientation_lock_state is not MISSING else None,
+            tablet_orientation_lock_state=int(tablet_orientation_lock_state)
+            if tablet_orientation_lock_state is not MISSING
+            else None,
+            requires_age_gate=requires_age_gate if requires_age_gate is not MISSING else None,
+            shelf_rank=shelf_rank if shelf_rank is not MISSING else None,
             free_period_starts_at=free_period_starts_at.isoformat() if free_period_starts_at else None,
             free_period_ends_at=free_period_ends_at.isoformat() if free_period_ends_at else None,
             preview_video_asset_id=(preview_video_asset.id if preview_video_asset else None)
             if preview_video_asset is not MISSING
-            else None,
+            else MISSING,
         )
         self._update(data)
 
@@ -613,6 +707,24 @@ class ApplicationBot(User):
     def require_code_grant(self) -> bool:
         """:class:`bool`: Whether the bot requires the completion of the full OAuth2 code grant flow to join."""
         return self.application.require_code_grant
+
+    @property
+    def disabled(self) -> bool:
+        """:class:`bool`: Whether the bot is disabled by Discord.
+
+        .. versionadded:: 2.1
+        """
+        return self.application.disabled
+
+    @property
+    def quarantined(self) -> bool:
+        """:class:`bool`: Whether the bot is quarantined by Discord.
+
+        Quarantined bots cannot join more guilds or start new direct messages.
+
+        .. versionadded:: 2.1
+        """
+        return self.application.quarantined
 
     @property
     def bio(self) -> Optional[str]:
@@ -732,8 +844,12 @@ class ApplicationExecutable:
     -----------
     name: :class:`str`
         The name of the executable.
-    os: :class:`str`
+    os: :class:`OperatingSystem`
         The operating system the executable is for.
+
+        .. versionchanged:: 2.1
+
+            The type of this attribute has changed to :class:`OperatingSystem`.
     launcher: :class:`bool`
         Whether the executable is a launcher or not.
     application: :class:`PartialApplication`
@@ -747,9 +863,9 @@ class ApplicationExecutable:
         'application',
     )
 
-    def __init__(self, *, data: dict, application: PartialApplication):
+    def __init__(self, *, data: ApplicationExecutablePayload, application: PartialApplication):
         self.name: str = data['name']
-        self.os: Literal['win32', 'linux', 'darwin'] = data['os']
+        self.os: OperatingSystem = OperatingSystem.from_string(data['os'])
         self.launcher: bool = data['is_launcher']
         self.application = application
 
@@ -1077,7 +1193,7 @@ class Manifest(Hashable):
 
         Parameters
         -----------
-        manifest: :class:`Metadata`
+        manifest: Mapping[:class:`str`, Any]
             A dict-like object representing the manifest to upload.
 
         Raises
@@ -1501,7 +1617,7 @@ class ApplicationBranch(Hashable):
 
         Parameters
         -----------
-        manifests: List[:class:`Metadata`]
+        manifests: List[Mapping[:class:`str`, Any]]
             A list of dict-like objects representing the manifests.
         source_build: Optional[:class:`ApplicationBuild`]
             The source build of the build, if any.
@@ -1651,8 +1767,12 @@ class PartialApplication(Hashable):
         The application name.
     description: :class:`str`
         The application description.
-    rpc_origins: List[:class:`str`]
+    rpc_origins: Optional[List[:class:`str`]]
         A list of RPC origin URLs, if RPC is enabled.
+
+        .. versionchanged:: 2.1
+
+            The type of this attribute has changed to Optional[List[:class:`str`]].
     verify_key: :class:`str`
         The hex encoded key for verification in interactions and the
         GameSDK's :ddocs:`GetTicket <game-sdk/applications#getticket`.
@@ -1780,7 +1900,7 @@ class PartialApplication(Hashable):
         self.id: int = int(data['id'])
         self.name: str = data['name']
         self.description: str = data['description']
-        self.rpc_origins: List[str] = data.get('rpc_origins') or []
+        self.rpc_origins: Optional[List[str]] = data.get('rpc_origins')
         self.verify_key: str = data['verify_key']
 
         self.aliases: List[str] = data.get('aliases', [])
@@ -1795,6 +1915,7 @@ class PartialApplication(Hashable):
 
         self._icon: Optional[str] = data.get('icon')
         self._cover_image: Optional[str] = data.get('cover_image')
+        self._splash: Optional[str] = data.get('splash')
 
         self.terms_of_service_url: Optional[str] = data.get('terms_of_service_url')
         self.privacy_policy_url: Optional[str] = data.get('privacy_policy_url')
@@ -1827,6 +1948,7 @@ class PartialApplication(Hashable):
         self.public: bool = data.get('integration_public', data.get('bot_public', True))
         self.require_code_grant: bool = data.get('integration_require_code_grant', data.get('bot_require_code_grant', False))
         self._has_bot: bool = 'bot_public' in data
+        self._guild: Optional[Guild] = state.create_guild(data['guild']) if 'guild' in data else None
 
         # Hacky, but I want these to be persisted
 
@@ -1836,7 +1958,10 @@ class PartialApplication(Hashable):
 
         existing = getattr(self, 'team', None)
         team = data.get('team')
-        self.team = Team(state=state, data=team) if team else existing
+        if existing and team:
+            existing._update(team)
+        else:
+            self.team = Team(state=state, data=team) if team else existing
 
         if self.team and not self.owner:
             # We can create a team user from the team data
@@ -1851,14 +1976,16 @@ class PartialApplication(Hashable):
             }
             self.owner = state.create_user(payload)
 
-        self._guild: Optional[Guild] = None
-        if 'guild' in data:
-            from .guild import Guild
-
-            self._guild = Guild(state=state, data=data['guild'])
-
     def __repr__(self) -> str:
         return f'<{self.__class__.__name__} id={self.id} name={self.name!r} description={self.description!r}>'
+
+    @property
+    def created_at(self) -> datetime:
+        """:class:`datetime.datetime`: Returns the application's creation time in UTC.
+
+        .. versionadded:: 2.1
+        """
+        return utils.snowflake_time(self.id)
 
     @property
     def icon(self) -> Optional[Asset]:
@@ -1873,6 +2000,16 @@ class PartialApplication(Hashable):
         if self._cover_image is None:
             return None
         return Asset._from_icon(self._state, self.id, self._cover_image, path='app')
+
+    @property
+    def splash(self) -> Optional[Asset]:
+        """Optional[:class:`Asset`]: Retrieves the application's splash, if any.
+
+        .. versionadded:: 2.1
+        """
+        if self._splash is None:
+            return None
+        return Asset._from_icon(self._state, self.id, self._splash, path='app')
 
     @property
     def flags(self) -> ApplicationFlags:
@@ -1907,6 +2044,13 @@ class PartialApplication(Hashable):
         .. versionadded:: 2.1
         """
         return self._has_bot
+
+    def is_rpc_enabled(self) -> bool:
+        """:class:`bool`: Whether the application has the ability to access the client RPC server.
+
+        .. versionadded:: 2.1
+        """
+        return self.rpc_origins is not None
 
     async def assets(self) -> List[ApplicationAsset]:
         """|coro|
@@ -2143,8 +2287,27 @@ class Application(PartialApplication):
         The application owner. This may be a team user account.
     bot: Optional[:class:`ApplicationBot`]
         The bot attached to the application, if any.
+    disabled: :class:`bool`
+        Whether the bot attached to this application is disabled by Discord.
+
+        .. versionadded:: 2.1
+    quarantined: :class:`bool`
+        Whether the bot attached to this application is quarantined by Discord.
+
+        Quarantined bots cannot join more guilds or start new direct messages.
+
+        .. versionadded:: 2.1
     interactions_endpoint_url: Optional[:class:`str`]
         The URL interactions will be sent to, if set.
+    interactions_version: :class:`int`
+        The interactions version to use. Different versions have different payloads and supported features.
+
+        .. versionadded:: 2.1
+    interactions_event_types: List[:class:`str`]
+        The interaction event types to subscribe to.
+        Requires a valid :attr:`interactions_endpoint_url` and :attr:`interactions_version` 2 or higher.
+
+        .. versionadded:: 2.1
     role_connections_verification_url: Optional[:class:`str`]
         The application's connection verification URL which will render the application as
         a verification method in the guild's role verification configuration.
@@ -2158,8 +2321,8 @@ class Application(PartialApplication):
         The approval state of the RPC usage application.
     discoverability_state: :class:`ApplicationDiscoverabilityState`
         The state of the application in the application directory.
-    approximate_guild_count: Optional[:class:`int`]
-        The approximate number of guilds this application is in, if available.
+    approximate_guild_count: :class:`int`
+        The approximate number of guilds this application is in.
 
         .. versionadded:: 2.1
     """
@@ -2168,8 +2331,12 @@ class Application(PartialApplication):
         'owner',
         'redirect_uris',
         'interactions_endpoint_url',
+        'interactions_version',
+        'interactions_event_types',
         'role_connections_verification_url',
         'bot',
+        'disabled',
+        'quarantined',
         'verification_state',
         'store_application_state',
         'rpc_application_state',
@@ -2188,8 +2355,12 @@ class Application(PartialApplication):
     def _update(self, data: ApplicationPayload) -> None:
         super()._update(data)
 
+        self.disabled: bool = data.get('bot_disabled', False)
+        self.quarantined: bool = data.get('bot_quarantined', False)
         self.redirect_uris: List[str] = data.get('redirect_uris', [])
         self.interactions_endpoint_url: Optional[str] = data.get('interactions_endpoint_url')
+        self.interactions_version: InteractionsVersion = data.get('interactions_version', 1)
+        self.interactions_event_types: List[str] = data.get('interactions_event_types', [])
         self.role_connections_verification_url: Optional[str] = data.get('role_connections_verification_url')
 
         self.verification_state = try_enum(ApplicationVerificationState, data['verification_state'])
@@ -2197,7 +2368,7 @@ class Application(PartialApplication):
         self.rpc_application_state = try_enum(RPCApplicationState, data.get('rpc_application_state', 0))
         self.discoverability_state = try_enum(ApplicationDiscoverabilityState, data.get('discoverability_state', 1))
         self._discovery_eligibility_flags = data.get('discovery_eligibility_flags', 0)
-        self.approximate_guild_count: Optional[int] = data.get('approximate_guild_count')
+        self.approximate_guild_count: int = data.get('approximate_guild_count', 0)
 
         state = self._state
 
@@ -2242,6 +2413,8 @@ class Application(PartialApplication):
         privacy_policy_url: Optional[str] = MISSING,
         deeplink_uri: Optional[str] = MISSING,
         interactions_endpoint_url: Optional[str] = MISSING,
+        interactions_version: InteractionsVersion = MISSING,
+        interactions_event_types: Sequence[str] = MISSING,
         role_connections_verification_url: Optional[str] = MISSING,
         redirect_uris: Sequence[str] = MISSING,
         rpc_origins: Sequence[str] = MISSING,
@@ -2285,6 +2458,15 @@ class Application(PartialApplication):
             .. versionadded:: 2.1
         interactions_endpoint_url: Optional[:class:`str`]
             The URL interactions will be sent to, if set.
+        interactions_version: :class:`int`
+            The interactions version to use. Different versions have different payloads and supported features.
+
+            .. versionadded:: 2.1
+        interactions_event_types: List[:class:`str`]
+            The interaction event types to subscribe to.
+            Requires a valid :attr:`interactions_endpoint_url` and :attr:`interactions_version` 2 or higher.
+
+            .. versionadded:: 2.1
         role_connections_verification_url: Optional[:class:`str`]
             The connection verification URL for the application.
 
@@ -2349,12 +2531,16 @@ class Application(PartialApplication):
             payload['deeplink_uri'] = deeplink_uri or ''
         if interactions_endpoint_url is not MISSING:
             payload['interactions_endpoint_url'] = interactions_endpoint_url or ''
+        if interactions_version is not MISSING:
+            payload['interactions_version'] = interactions_version
+        if interactions_event_types is not MISSING:
+            payload['interactions_event_types'] = interactions_event_types or []
         if role_connections_verification_url is not MISSING:
             payload['role_connections_verification_url'] = role_connections_verification_url or ''
         if redirect_uris is not MISSING:
-            payload['redirect_uris'] = redirect_uris
+            payload['redirect_uris'] = redirect_uris or []
         if rpc_origins is not MISSING:
-            payload['rpc_origins'] = rpc_origins
+            payload['rpc_origins'] = rpc_origins or []
         if public is not MISSING:
             if self.bot:
                 payload['bot_public'] = public
@@ -2390,7 +2576,6 @@ class Application(PartialApplication):
             await self._state.http.transfer_application(self.id, team.id)
 
         data = await self._state.http.edit_application(self.id, payload)
-
         self._update(data)
 
     async def fetch_bot(self) -> ApplicationBot:
@@ -3373,6 +3558,7 @@ class Application(PartialApplication):
         self,
         *,
         supported_platforms: Collection[EmbeddedActivityPlatform] = MISSING,
+        platform_configs: Collection[EmbeddedActivityPlatformConfig] = MISSING,
         orientation_lock_state: EmbeddedActivityOrientation = MISSING,
         tablet_orientation_lock_state: EmbeddedActivityOrientation = MISSING,
         requires_age_gate: bool = MISSING,
@@ -3389,6 +3575,10 @@ class Application(PartialApplication):
         -----------
         supported_platforms: List[:class:`EmbeddedActivityPlatform`]
             A list of platforms that the activity supports.
+        platform_configs: List[:class:`EmbeddedActivityPlatformConfig`]
+            A list of configurations for each supported activity platform.
+
+            .. versionadded:: 2.1
         orientation_lock_state: :class:`EmbeddedActivityOrientation`
             The mobile orientation lock state of the activity.
         tablet_orientation_lock_state: :class:`EmbeddedActivityOrientation`
@@ -3418,16 +3608,21 @@ class Application(PartialApplication):
         """
         data = await self._state.http.edit_embedded_activity_config(
             self.id,
-            supported_platforms=[str(x) for x in (supported_platforms or [])],
-            orientation_lock_state=int(orientation_lock_state),
-            tablet_orientation_lock_state=int(tablet_orientation_lock_state),
-            requires_age_gate=requires_age_gate,
-            shelf_rank=shelf_rank,
+            supported_platforms=[str(x) for x in (supported_platforms)] if supported_platforms is not MISSING else None,
+            platform_config={c.platform.value: c.to_dict() for c in (platform_configs)}
+            if platform_configs is not MISSING
+            else None,
+            orientation_lock_state=int(orientation_lock_state) if orientation_lock_state is not MISSING else None,
+            tablet_orientation_lock_state=int(tablet_orientation_lock_state)
+            if tablet_orientation_lock_state is not MISSING
+            else None,
+            requires_age_gate=requires_age_gate if requires_age_gate is not MISSING else None,
+            shelf_rank=shelf_rank if shelf_rank is not MISSING else None,
             free_period_starts_at=free_period_starts_at.isoformat() if free_period_starts_at else None,
             free_period_ends_at=free_period_ends_at.isoformat() if free_period_ends_at else None,
             preview_video_asset_id=(preview_video_asset.id if preview_video_asset else None)
             if preview_video_asset is not MISSING
-            else None,
+            else MISSING,
         )
         if self.embedded_activity_config is not None:
             self.embedded_activity_config._update(data)
@@ -3489,8 +3684,12 @@ class IntegrationApplication(Hashable):
         The application name.
     bot: Optional[:class:`User`]
         The bot attached to the application, if any.
-    description: Optional[:class:`str`]
+    description: :class:`str`
         The application description.
+    deeplink_uri: Optional[:class:`str`]
+        The application's deeplink URI, if set.
+
+        .. versionadded:: 2.1
     type: Optional[:class:`ApplicationType`]
         The type of application.
     primary_sku_id: Optional[:class:`int`]
@@ -3499,6 +3698,10 @@ class IntegrationApplication(Hashable):
     role_connections_verification_url: Optional[:class:`str`]
         The application's connection verification URL which will render the application as
         a verification method in the guild's role verification configuration.
+    third_party_skus: List[:class:`ThirdPartySKU`]
+        A list of third party platforms the SKU is available at.
+
+        .. versionadded:: 2.1
     """
 
     __slots__ = (
@@ -3507,11 +3710,14 @@ class IntegrationApplication(Hashable):
         'name',
         'bot',
         'description',
+        'deeplink_uri',
         'type',
         'primary_sku_id',
         'role_connections_verification_url',
+        'third_party_skus',
         '_icon',
         '_cover_image',
+        '_splash',
     )
 
     def __init__(self, *, state: ConnectionState, data: BaseApplicationPayload):
@@ -3525,16 +3731,29 @@ class IntegrationApplication(Hashable):
         self.id: int = int(data['id'])
         self.name: str = data['name']
         self.description: str = data.get('description') or ''
+        self.deeplink_uri: Optional[str] = data.get('deeplink_uri')
         self.type: Optional[ApplicationType] = try_enum(ApplicationType, data['type']) if 'type' in data else None
 
         self._icon: Optional[str] = data.get('icon')
         self._cover_image: Optional[str] = data.get('cover_image')
-        self.bot: Optional[User] = self._state.create_user(data['bot']) if 'bot' in data else None  # type: ignore
+        self._splash: Optional[str] = data.get('splash')
+        self.bot: Optional[User] = self._state.create_user(data['bot']) if 'bot' in data else None
         self.primary_sku_id: Optional[int] = utils._get_as_snowflake(data, 'primary_sku_id')
         self.role_connections_verification_url: Optional[str] = data.get('role_connections_verification_url')
+        self.third_party_skus: List[ThirdPartySKU] = [
+            ThirdPartySKU(data=t, application=self) for t in data.get('third_party_skus', [])
+        ]
 
     def __repr__(self) -> str:
         return f'<IntegrationApplication id={self.id} name={self.name!r}>'
+
+    @property
+    def created_at(self) -> datetime:
+        """:class:`datetime.datetime`: Returns the application's creation time in UTC.
+
+        .. versionadded:: 2.1
+        """
+        return utils.snowflake_time(self.id)
 
     @property
     def icon(self) -> Optional[Asset]:
@@ -3549,6 +3768,16 @@ class IntegrationApplication(Hashable):
         if self._cover_image is None:
             return None
         return Asset._from_icon(self._state, self.id, self._cover_image, path='app')
+
+    @property
+    def splash(self) -> Optional[Asset]:
+        """Optional[:class:`Asset`]: Retrieves the application's splash, if any.
+
+        .. versionadded:: 2.1
+        """
+        if self._splash is None:
+            return None
+        return Asset._from_icon(self._state, self.id, self._splash, path='app')
 
     @property
     def primary_sku_url(self) -> Optional[str]:
