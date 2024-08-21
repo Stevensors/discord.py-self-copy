@@ -22,6 +22,8 @@ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 """
 
+from __future__ import annotations
+
 from typing import Any, Dict, List, Literal, Optional, TypedDict
 from typing_extensions import NotRequired
 
@@ -34,11 +36,12 @@ class PartialUser(TypedDict):
     username: str
     discriminator: str
     avatar: Optional[str]
-    avatar_decoration: NotRequired[Optional[str]]
+    avatar_decoration_data: NotRequired[Optional[UserAvatarDecorationData]]
     public_flags: NotRequired[int]
     bot: NotRequired[bool]
     system: NotRequired[bool]
     global_name: Optional[str]
+    premium_type: NotRequired[PremiumType]
 
 
 ConnectionType = Literal[
@@ -88,6 +91,11 @@ class User(APIUser, total=False):
     phone: Optional[str]
     token: str
     nsfw_allowed: Optional[bool]
+
+
+class UserAvatarDecorationData(TypedDict):
+    asset: str
+    sku_id: NotRequired[Snowflake]
 
 
 class PomeloAttempt(TypedDict):
@@ -236,6 +244,7 @@ class FriendSuggestionReason(TypedDict):
 class FriendSuggestion(TypedDict):
     suggested_user: PartialUser
     reasons: List[FriendSuggestionReason]
+    from_suggested_user_contacts: NotRequired[bool]
 
 
 class Report(TypedDict):

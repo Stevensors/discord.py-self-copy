@@ -107,12 +107,15 @@ __all__ = (
     'ApplicationAssetType',
     'SKUType',
     'SKUAccessLevel',
+    'SKUProductLine',
     'SKUFeature',
     'SKUGenre',
     'OperatingSystem',
     'ContentRatingAgency',
     'Distributor',
     'EntitlementType',
+    'RefundReason',
+    'RefundDisqualificationReason',
     'AutoModRuleTriggerType',
     'AutoModRuleEventType',
     'AutoModRuleActionType',
@@ -122,6 +125,8 @@ __all__ = (
     'DirectoryEntryType',
     'DirectoryCategory',
     'HubType',
+    'NetworkConnectionType',
+    'NetworkConnectionSpeed',
 )
 
 if TYPE_CHECKING:
@@ -1043,13 +1048,13 @@ T = TypeVar('T')
 
 class Locale(Enum):
     american_english = 'en-US'
+    arabic = 'ar'
     british_english = 'en-GB'
     bulgarian = 'bg'
     chinese = 'zh-CN'
     taiwan_chinese = 'zh-TW'
     croatian = 'hr'
     czech = 'cs'
-    indonesian = 'id'
     danish = 'da'
     dutch = 'nl'
     finnish = 'fi'
@@ -1058,9 +1063,11 @@ class Locale(Enum):
     greek = 'el'
     hindi = 'hi'
     hungarian = 'hu'
+    indonesian = 'id'
     italian = 'it'
     japanese = 'ja'
     korean = 'ko'
+    latin_american_spanish = 'es-419'
     lithuanian = 'lt'
     norwegian = 'no'
     polish = 'pl'
@@ -1184,6 +1191,7 @@ class PaymentSourceType(Enum):
     bancontact = 14
     eps = 15
     ideal = 16
+    cash_app = 17
     payment_request = 99
 
 
@@ -1281,6 +1289,19 @@ class SKUAccessLevel(Enum, comparable=True):
     full = 1
     early_access = 2
     vip_access = 3
+
+    def __int__(self) -> int:
+        return self.value
+
+
+class SKUProductLine(Enum):
+    premium = 1
+    premium_guild = 2
+    iap = 3
+    guild_role = 4
+    guild_product = 5
+    application = 6
+    collectible = 7
 
     def __int__(self) -> int:
         return self.value
@@ -1536,6 +1557,31 @@ class EntitlementType(Enum):
         return self.value
 
 
+class RefundReason(Enum):
+    other = 0
+    gifting_refund = 1
+    buyers_remorse = 2
+    wrong_purchase = 3
+    forgot_to_cancel = 4
+    premium_guild_cooldown = 5
+    user_confusion = 6
+    want_to_switch_tiers = 7
+    dont_need = 8
+
+    def __int__(self) -> int:
+        return self.value
+
+
+class RefundDisqualificationReason(Enum):
+    other = 0
+    already_refunded = 1
+    not_user_refundable_type = 2
+    past_refundable_date = 3
+    entitlement_already_consumed = 4
+    already_refunded_premium = 5
+    already_refunded_premium_guild = 6
+
+
 class AutoModRuleTriggerType(Enum):
     keyword = 1
     harmful_link = 2
@@ -1597,6 +1643,32 @@ class HubType(Enum):
     high_school = 1
     college = 2
     university = 2
+
+
+class NetworkConnectionType(Enum):
+    bluetooth = 'bluetooth'
+    cellular = 'cellular'
+    ethernet = 'ethernet'
+    none = 'none'
+    other = 'other'
+    unknown = 'unknown'
+    wifi = 'wifi'
+    wimax = 'wimax'
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class NetworkConnectionSpeed(Enum):
+    five_g = '5g'
+    four_g = '4g'
+    three_g = '3g'
+    two_g = '2g'
+    slow_two_g = 'slow-2g'
+    unknown = 'unknown'
+
+    def __str__(self) -> str:
+        return self.value
 
 
 def create_unknown_value(cls: Type[E], val: Any) -> E:

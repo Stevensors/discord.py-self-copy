@@ -32,7 +32,7 @@ import threading
 import traceback
 import zlib
 
-from typing import Any, Callable, Coroutine, Dict, List, TYPE_CHECKING, NamedTuple, Optional, TypeVar
+from typing import Any, Callable, Coroutine, Dict, List, TYPE_CHECKING, NamedTuple, Optional, Sequence, TypeVar
 
 import aiohttp
 import yarl
@@ -61,6 +61,7 @@ if TYPE_CHECKING:
     from .enums import Status
     from .state import ConnectionState
     from .types.snowflake import Snowflake
+    from .types.gateway import BulkGuildSubscribePayload
     from .voice_client import VoiceClient
 
 
@@ -238,45 +239,10 @@ class DiscordWebSocket:
 
     Attributes
     -----------
-    DISPATCH
-        Receive only. Denotes an event to be sent to Discord, such as READY.
-    HEARTBEAT
-        When received tells Discord to keep the connection alive.
-        When sent asks if your connection is currently alive.
-    IDENTIFY
-        Send only. Starts a new session.
-    PRESENCE
-        Send only. Updates your presence.
-    VOICE_STATE
-        Send only. Starts a new connection to a voice guild.
-    VOICE_PING
-        Send only. Checks ping time to a voice guild, do not use.
-    RESUME
-        Send only. Resumes an existing connection.
-    RECONNECT
-        Receive only. Tells the client to reconnect to a new gateway.
-    REQUEST_MEMBERS
-        Send only. Asks for the guild members.
-    INVALIDATE_SESSION
-        Receive only. Tells the client to optionally invalidate the session
-        and IDENTIFY again.
-    HELLO
-        Receive only. Tells the client the heartbeat interval.
-    HEARTBEAT_ACK
-        Receive only. Confirms receiving of a heartbeat. Not having it implies
-        a connection issue.
-    GUILD_SYNC
-        Send only. Requests a guild sync. This is unfortunately no longer functional.
-    CALL_CONNECT
-        Send only. Maybe used for calling? Probably just tracking.
-    GUILD_SUBSCRIBE
-        Send only. Subscribes you to guilds/guild members. Might respond with GUILD_MEMBER_LIST_UPDATE.
-    REQUEST_COMMANDS
-        Send only. Requests application commands from a guild. Responds with GUILD_APPLICATION_COMMANDS_UPDATE.
     gateway
         The gateway we are currently connected to.
     token
-        The authentication token for discord.
+        The authentication token for Discord.
     """
 
     if TYPE_CHECKING:
@@ -307,11 +273,12 @@ class DiscordWebSocket:
     INVALIDATE_SESSION    = 9
     HELLO                 = 10
     HEARTBEAT_ACK         = 11
-    GUILD_SYNC            = 12  # :(
+    # GUILD_SYNC          = 12
     CALL_CONNECT          = 13
-    GUILD_SUBSCRIBE       = 14
-    REQUEST_COMMANDS      = 24
+    GUILD_SUBSCRIBE       = 14  # Deprecated
+    # REQUEST_COMMANDS    = 24
     SEARCH_RECENT_MEMBERS = 35
+    BULK_GUILD_SUBSCRIBE  = 37
     # fmt: on
 
     def __init__(self, socket: aiohttp.ClientWebSocketResponse, *, loop: asyncio.AbstractEventLoop) -> None:
@@ -333,6 +300,10 @@ class DiscordWebSocket:
         self._buffer: bytearray = bytearray()
         self._close_code: Optional[int] = None
         self._rate_limiter: GatewayRatelimiter = GatewayRatelimiter()
+
+        # Presence state tracking
+        self.afk: bool = False
+        self.idle_since: int = 0
 
     @property
     def open(self) -> bool:
@@ -395,6 +366,8 @@ class DiscordWebSocket:
         ws._user_agent = client.http.user_agent
         ws._super_properties = client.http.super_properties
         ws._zlib_enabled = zlib
+        ws.afk = client._connection._afk
+        ws.idle_since = client._connection._idle_since
 
         if client._enable_debug_events:
             ws.send = ws.debug_send
@@ -456,15 +429,13 @@ class DiscordWebSocket:
         # but that needs more testing...
         presence = {
             'status': 'unknown',
-            'since': 0,
+            'since': self.idle_since,
             'activities': [],
-            'afk': False,
+            'afk': self.afk,
         }
         existing = self._connection.current_session
         if existing is not None:
             presence['status'] = str(existing.status) if existing.status is not Status.offline else 'invisible'
-            if existing.status == Status.idle:
-                presence['since'] = int(time.time() * 1000)
             presence['activities'] = [a.to_dict() for a in existing.activities]
         # else:
         #     presence['status'] = self._connection._status or 'unknown'
@@ -482,11 +453,12 @@ class DiscordWebSocket:
                 'client_state': {
                     'api_code_version': 0,
                     'guild_versions': {},
-                    'highest_last_message_id': '0',
-                    'private_channels_version': '0',
-                    'read_state_version': 0,
-                    'user_guild_settings_version': -1,
-                    'user_settings_version': -1,
+                    # 'highest_last_message_id': '0',
+                    # 'initial_guild_id': None,
+                    # 'private_channels_version': '0',
+                    # 'read_state_version': 0,
+                    # 'user_guild_settings_version': -1,
+                    # 'user_settings_version': -1,
                 },
             },
         }
@@ -700,7 +672,7 @@ class DiscordWebSocket:
     async def change_presence(
         self,
         *,
-        activities: Optional[List[ActivityTypes]] = None,
+        activities: Optional[Sequence[ActivityTypes]] = None,
         status: Optional[Status] = None,
         since: int = 0,
         afk: bool = False,
@@ -712,19 +684,17 @@ class DiscordWebSocket:
         else:
             activities_data = []
 
-        if status == 'idle':
-            since = int(time.time() * 1000)
-
         payload = {
             'op': self.PRESENCE,
-            'd': {'activities': activities_data, 'afk': afk, 'since': since, 'status': str(status or 'online')},
+            'd': {'activities': activities_data, 'afk': afk, 'since': since, 'status': str(status or 'unknown')},
         }
 
-        sent = utils._to_json(payload)
-        _log.debug('Sending "%s" to change presence.', sent)
-        await self.send(sent)
+        _log.debug('Sending %s to change presence.', payload['d'])
+        await self.send_as_json(payload)
+        self.afk = afk
+        self.idle_since = since
 
-    async def request_lazy_guild(
+    async def guild_subscribe(
         self,
         guild_id: Snowflake,
         *,
@@ -757,6 +727,17 @@ class DiscordWebSocket:
             data['thread_member_lists'] = thread_member_lists
 
         _log.debug('Subscribing to guild %s with payload %s', guild_id, payload['d'])
+        await self.send_as_json(payload)
+
+    async def bulk_guild_subscribe(self, subscriptions: BulkGuildSubscribePayload) -> None:
+        payload = {
+            'op': self.BULK_GUILD_SUBSCRIBE,
+            'd': {
+                'subscriptions': subscriptions,
+            },
+        }
+
+        _log.debug('Subscribing to guilds with payload %s', payload['d'])
         await self.send_as_json(payload)
 
     async def request_chunks(
@@ -816,44 +797,6 @@ class DiscordWebSocket:
         payload = {'op': self.CALL_CONNECT, 'd': {'channel_id': str(channel_id)}}
 
         _log.debug('Requesting call connect for channel %s.', channel_id)
-        await self.send_as_json(payload)
-
-    async def request_commands(
-        self,
-        guild_id: Snowflake,
-        type: int,
-        *,
-        nonce: Optional[str] = None,
-        limit: Optional[int] = None,
-        applications: Optional[bool] = None,
-        offset: int = 0,
-        query: Optional[str] = None,
-        command_ids: Optional[List[Snowflake]] = None,
-        application_id: Optional[Snowflake] = None,
-    ) -> None:
-        payload = {
-            'op': self.REQUEST_COMMANDS,
-            'd': {
-                'guild_id': str(guild_id),
-                'type': type,
-            },
-        }
-
-        if nonce is not None:
-            payload['d']['nonce'] = nonce
-        if applications is not None:
-            payload['d']['applications'] = applications
-        if limit is not None and limit != 25:
-            payload['d']['limit'] = limit
-        if offset:
-            payload['d']['offset'] = offset
-        if query is not None:
-            payload['d']['query'] = query
-        if command_ids is not None:
-            payload['d']['command_ids'] = command_ids
-        if application_id is not None:
-            payload['d']['application_id'] = str(application_id)
-
         await self.send_as_json(payload)
 
     async def search_recent_members(

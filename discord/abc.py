@@ -27,6 +27,7 @@ from __future__ import annotations
 import copy
 import asyncio
 from datetime import datetime
+from operator import attrgetter
 from typing import (
     Any,
     AsyncIterator,
@@ -48,7 +49,7 @@ from typing import (
 
 from .object import OLDEST_OBJECT, Object
 from .context_managers import Typing
-from .enums import ApplicationCommandType, ChannelType, InviteTarget
+from .enums import ApplicationCommandType, ChannelType, InviteTarget, NetworkConnectionType
 from .errors import ClientException
 from .mentions import AllowedMentions
 from .permissions import PermissionOverwrite, Permissions
@@ -169,7 +170,6 @@ def _handle_commands(
     limit: Optional[int] = ...,
     command_ids: Optional[Collection[int]] = ...,
     application: Optional[Snowflake] = ...,
-    with_applications: bool = ...,
     target: Optional[Snowflake] = ...,
 ) -> AsyncIterator[SlashCommand]:
     ...
@@ -184,7 +184,6 @@ def _handle_commands(
     limit: Optional[int] = ...,
     command_ids: Optional[Collection[int]] = ...,
     application: Optional[Snowflake] = ...,
-    with_applications: bool = ...,
     target: Optional[Snowflake] = ...,
 ) -> AsyncIterator[UserCommand]:
     ...
@@ -199,7 +198,6 @@ def _handle_commands(
     limit: Optional[int] = ...,
     command_ids: Optional[Collection[int]] = ...,
     application: Optional[Snowflake] = ...,
-    with_applications: bool = ...,
     target: Optional[Snowflake] = ...,
 ) -> AsyncIterator[MessageCommand]:
     ...
@@ -207,13 +205,12 @@ def _handle_commands(
 
 async def _handle_commands(
     messageable: Union[Messageable, Message],
-    type: ApplicationCommandType,
+    type: Optional[ApplicationCommandType] = None,
     *,
     query: Optional[str] = None,
     limit: Optional[int] = None,
     command_ids: Optional[Collection[int]] = None,
     application: Optional[Snowflake] = None,
-    with_applications: bool = True,
     target: Optional[Snowflake] = None,
 ) -> AsyncIterator[BaseCommand]:
     if limit is not None and limit < 0:
@@ -221,70 +218,42 @@ async def _handle_commands(
     if query and command_ids:
         raise TypeError('Cannot specify both query and command_ids')
 
-    state = messageable._state
-    endpoint = state.http.search_application_commands
     channel = await messageable._get_channel()
-    _, cls = _command_factory(type.value)
     cmd_ids = list(command_ids) if command_ids else None
 
     application_id = application.id if application else None
     if channel.type == ChannelType.private:
-        recipient: User = channel.recipient  # type: ignore
-        if not recipient.bot:
-            raise TypeError('Cannot fetch commands in a DM with a non-bot user')
-        application_id = recipient.id
-        target = recipient
+        target = channel.recipient  # type: ignore
     elif channel.type == ChannelType.group:
         return
 
-    prev_cursor = MISSING
-    cursor = MISSING
-    while True:
-        # We keep two cursors because Discord just sends us an infinite loop sometimes
-        retrieve = min((25 if not cmd_ids else 0) if limit is None else limit, 25)
+    cmds = await channel.application_commands()
+    for cmd in cmds:
+        # Handle faked parameters
+        if type is not None and cmd.type != type:
+            continue
+        if query and query.lower() not in cmd.name:
+            continue
+        if (not cmd_ids or cmd.id not in cmd_ids) and limit == 0:
+            continue
+        if application_id and cmd.application_id != application_id:
+            continue
+        if target:
+            if cmd.type == ApplicationCommandType.user:
+                cmd._user = target
+            elif cmd.type == ApplicationCommandType.message:
+                cmd._message = target  # type: ignore
 
-        if not application_id and limit is not None:
-            limit -= retrieve
-        if (not cmd_ids and retrieve < 1) or cursor is None or (prev_cursor is not MISSING and prev_cursor == cursor):
-            return
+        # We follow Discord behavior
+        if limit is not None and (not cmd_ids or cmd.id not in cmd_ids):
+            limit -= 1
 
-        data = await endpoint(
-            channel.id,
-            type.value,
-            limit=retrieve if not application_id else None,
-            query=query if not cmd_ids and not application_id else None,
-            command_ids=cmd_ids if not application_id and not cursor else None,  # type: ignore
-            application_id=application_id,
-            include_applications=with_applications if (not application_id or with_applications) else None,
-            cursor=cursor,
-        )
-        prev_cursor = cursor
-        cursor = data['cursor'].get('next')
-        cmds = data['application_commands']
-        apps = {int(app['id']): state.create_integration_application(app) for app in data.get('applications') or []}
+        try:
+            cmd_ids.remove(cmd.id) if cmd_ids else None
+        except ValueError:
+            pass
 
-        for cmd in cmds:
-            # Handle faked parameters
-            if application_id and query and query.lower() not in cmd['name']:
-                continue
-            elif application_id and (not cmd_ids or int(cmd['id']) not in cmd_ids) and limit == 0:
-                continue
-
-            # We follow Discord behavior
-            if application_id and limit is not None and (not cmd_ids or int(cmd['id']) not in cmd_ids):
-                limit -= 1
-
-            try:
-                cmd_ids.remove(int(cmd['id'])) if cmd_ids else None
-            except ValueError:
-                pass
-
-            application = apps.get(int(cmd['application_id']))
-            yield cls(state=state, data=cmd, channel=channel, target=target, application=application)
-
-        cmd_ids = None
-        if application_id or len(cmds) < min(limit if limit else 25, 25) or len(cmds) == limit == 25:
-            return
+        yield cmd
 
 
 async def _handle_message_search(
@@ -513,6 +482,14 @@ class User(Snowflake, Protocol):
         raise NotImplementedError
 
     @property
+    def avatar_decoration_sku_id(self) -> Optional[int]:
+        """Optional[:class:`int`]: Returns the SKU ID of the user's avatar decoration, if present.
+
+        .. versionadded:: 2.1
+        """
+        raise NotImplementedError
+
+    @property
     def default_avatar(self) -> Asset:
         """:class:`~discord.Asset`: Returns the default avatar for a given user."""
         raise NotImplementedError
@@ -645,6 +622,21 @@ class GuildChannel:
     def _sorting_bucket(self) -> int:
         raise NotImplementedError
 
+    @property
+    def member_list_id(self) -> Union[str, Literal["everyone"]]:
+        if self.permissions_for(self.guild.default_role).read_messages:
+            return "everyone"
+
+        overwrites = []
+        for overwrite in self._overwrites:
+            allow, deny = Permissions(overwrite.allow), Permissions(overwrite.deny)
+            if allow.read_messages:
+                overwrites.append(f"allow:{overwrite.id}")
+            elif deny.read_messages:
+                overwrites.append(f"deny:{overwrite.id}")
+
+        return str(utils.murmurhash32(",".join(sorted(overwrites)), signed=False))
+
     def _update(self, guild: Guild, data: Dict[str, Any]) -> None:
         raise NotImplementedError
 
@@ -663,7 +655,7 @@ class GuildChannel:
         bucket = self._sorting_bucket
         channels: List[GuildChannel] = [c for c in self.guild.channels if c._sorting_bucket == bucket]
 
-        channels.sort(key=lambda c: c.position)
+        channels.sort(key=attrgetter('position'))
 
         try:
             # remove ourselves from the channel list
@@ -1397,9 +1389,9 @@ class GuildChannel:
             An invalid position was given.
         TypeError
             A bad mix of arguments were passed.
-        Forbidden
+        ~discord.Forbidden
             You do not have permissions to move the channel.
-        HTTPException
+        ~discord.HTTPException
             Moving the channel failed.
         """
 
@@ -1433,7 +1425,7 @@ class GuildChannel:
             ]
         # fmt: on
 
-        channels.sort(key=lambda c: (c.position, c.id))
+        channels.sort(key=attrgetter('position', 'id'))
 
         try:
             # Try to remove ourselves from the channel list
@@ -1869,6 +1861,7 @@ class Messageable:
             mention_author=mention_author,
             stickers=sticker_ids,
             flags=flags,
+            network_type=NetworkConnectionType.unknown,
         ) as params:
             data = await state.http.send_message(channel.id, params=params)
 
@@ -2397,6 +2390,58 @@ class Messageable:
             most_relevant=most_relevant,
         )
 
+    async def application_commands(self) -> List[Union[SlashCommand, UserCommand, MessageCommand]]:
+        """|coro|
+
+        Returns a list of application commands available in the channel.
+
+        .. versionadded:: 2.1
+
+        .. note::
+
+            Commands that the user does not have permission to use will not be returned.
+
+        Raises
+        ------
+        TypeError
+            Attempted to fetch commands in a DM with a non-bot user.
+        ValueError
+            Could not resolve the channel's guild ID.
+        ~discord.HTTPException
+            Getting the commands failed.
+
+        Returns
+        -------
+        List[Union[:class:`~discord.SlashCommand`, :class:`~discord.UserCommand`, :class:`~discord.MessageCommand`]]
+            A list of application commands.
+        """
+        channel = await self._get_channel()
+        state = self._state
+        if channel.type is ChannelType.private:
+            if not channel.recipient.bot:  # type: ignore
+                raise TypeError('Cannot fetch commands in a DM with a non-bot user')
+
+            data = await state.http.channel_application_command_index(channel.id)
+        elif channel.type is ChannelType.group:
+            # TODO: Are commands in group DMs truly dead?
+            return []
+        else:
+            guild_id = getattr(channel.guild, 'id', getattr(channel, 'guild_id', None))
+            if not guild_id:
+                raise ValueError('Could not resolve channel guild ID') from None
+            data = await state.http.guild_application_command_index(guild_id)
+
+        cmds = data['application_commands']
+        apps = {int(app['id']): state.create_integration_application(app) for app in data.get('applications') or []}
+
+        result = []
+        for cmd in cmds:
+            _, cls = _command_factory(cmd['type'])
+            application = apps.get(int(cmd['application_id']))
+            result.append(cls(state=state, data=cmd, channel=channel, application=application))
+        return result
+
+    @utils.deprecated('Messageable.application_commands')
     def slash_commands(
         self,
         query: Optional[str] = None,
@@ -2407,6 +2452,8 @@ class Messageable:
         with_applications: bool = True,
     ) -> AsyncIterator[SlashCommand]:
         """Returns a :term:`asynchronous iterator` of the slash commands available in the channel.
+
+        .. deprecated:: 2.1
 
         Examples
         ---------
@@ -2427,13 +2474,8 @@ class Messageable:
         ----------
         query: Optional[:class:`str`]
             The query to search for. Specifying this limits results to 25 commands max.
-
-            This parameter is faked if ``application`` is specified.
         limit: Optional[:class:`int`]
-            The maximum number of commands to send back. Defaults to 0 if ``command_ids`` is passed, else 25.
-            If ``None``, returns all commands.
-
-            This parameter is faked if ``application`` is specified.
+            The maximum number of commands to send back. If ``None``, returns all commands.
         command_ids: Optional[List[:class:`int`]]
             List of up to 100 command IDs to search for. If the command doesn't exist, it won't be returned.
 
@@ -2442,7 +2484,7 @@ class Messageable:
         application: Optional[:class:`~discord.abc.Snowflake`]
             Whether to return this application's commands. Always set to DM recipient in a private channel context.
         with_applications: :class:`bool`
-            Whether to include applications in the response. Defaults to ``True``.
+            Whether to include applications in the response.
 
         Raises
         ------
@@ -2451,7 +2493,8 @@ class Messageable:
             Attempted to fetch commands in a DM with a non-bot user.
         ValueError
             The limit was not greater than or equal to 0.
-        HTTPException
+            Could not resolve the channel's guild ID.
+        ~discord.HTTPException
             Getting the commands failed.
         ~discord.Forbidden
             You do not have permissions to get the commands.
@@ -2470,9 +2513,9 @@ class Messageable:
             limit=limit,
             command_ids=command_ids,
             application=application,
-            with_applications=with_applications,
         )
 
+    @utils.deprecated('Messageable.application_commands')
     def user_commands(
         self,
         query: Optional[str] = None,
@@ -2483,6 +2526,8 @@ class Messageable:
         with_applications: bool = True,
     ) -> AsyncIterator[UserCommand]:
         """Returns a :term:`asynchronous iterator` of the user commands available to use on the user.
+
+        .. deprecated:: 2.1
 
         Examples
         ---------
@@ -2503,13 +2548,8 @@ class Messageable:
         ----------
         query: Optional[:class:`str`]
             The query to search for. Specifying this limits results to 25 commands max.
-
-            This parameter is faked if ``application`` is specified.
         limit: Optional[:class:`int`]
-            The maximum number of commands to send back. Defaults to 0 if ``command_ids`` is passed, else 25.
-            If ``None``, returns all commands.
-
-            This parameter is faked if ``application`` is specified.
+            The maximum number of commands to send back. If ``None``, returns all commands.
         command_ids: Optional[List[:class:`int`]]
             List of up to 100 command IDs to search for. If the command doesn't exist, it won't be returned.
 
@@ -2518,7 +2558,7 @@ class Messageable:
         application: Optional[:class:`~discord.abc.Snowflake`]
             Whether to return this application's commands. Always set to DM recipient in a private channel context.
         with_applications: :class:`bool`
-            Whether to include applications in the response. Defaults to ``True``.
+            Whether to include applications in the response.
 
         Raises
         ------
@@ -2527,7 +2567,8 @@ class Messageable:
             Attempted to fetch commands in a DM with a non-bot user.
         ValueError
             The limit was not greater than or equal to 0.
-        HTTPException
+            Could not resolve the channel's guild ID.
+        ~discord.HTTPException
             Getting the commands failed.
         ~discord.Forbidden
             You do not have permissions to get the commands.
@@ -2546,7 +2587,6 @@ class Messageable:
             limit=limit,
             command_ids=command_ids,
             application=application,
-            with_applications=with_applications,
         )
 
 

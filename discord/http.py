@@ -54,7 +54,7 @@ import datetime
 
 import aiohttp
 
-from .enums import RelationshipAction, InviteType
+from .enums import NetworkConnectionType, RelationshipAction, InviteType
 from .errors import (
     HTTPException,
     RateLimited,
@@ -239,6 +239,7 @@ def handle_message_parameters(
     previous_allowed_mentions: Optional[AllowedMentions] = None,
     mention_author: Optional[bool] = None,
     thread_name: str = MISSING,
+    network_type: NetworkConnectionType = MISSING,
     channel_payload: Dict[str, Any] = MISSING,
 ) -> MultipartParameters:
     if files is not MISSING and file is not MISSING:
@@ -294,6 +295,9 @@ def handle_message_parameters(
 
     if thread_name is not MISSING:
         payload['thread_name'] = thread_name
+
+    if network_type is not MISSING:
+        payload['mobile_network_type'] = str(network_type)
 
     if allowed_mentions:
         if previous_allowed_mentions is not None:
@@ -3086,7 +3090,7 @@ class HTTPClient:
         payment_source_id: Optional[Snowflake] = None,
         localize: bool = True,
         with_bundled_skus: bool = True,
-    ) -> Response[List[store.SKU]]:
+    ) -> Response[List[store.PrivateSKU]]:
         params = {}
         if country_code:
             params['country_code'] = country_code
@@ -3101,7 +3105,7 @@ class HTTPClient:
             Route('GET', '/applications/{app_id}/skus', app_id=app_id), params=params, super_properties_to_track=True
         )
 
-    def create_sku(self, payload: dict) -> Response[store.SKU]:
+    def create_sku(self, payload: dict) -> Response[store.PrivateSKU]:
         return self.request(Route('POST', '/store/skus'), json=payload, super_properties_to_track=True)
 
     def get_app_discoverability(self, app_id: Snowflake) -> Response[application.ApplicationDiscoverability]:
@@ -3503,7 +3507,7 @@ class HTTPClient:
         country_code: Optional[str] = None,
         payment_source_id: Optional[Snowflake] = None,
         localize: bool = True,
-    ) -> Response[store.StoreListing]:
+    ) -> Response[store.PrivateStoreListing]:
         params = {}
         if country_code:
             params['country_code'] = country_code
@@ -3512,7 +3516,7 @@ class HTTPClient:
         if not localize:
             params['localize'] = 'false'
 
-        return self.request(Route('GET', '/store/listings/{listing_id}', app_id=listing_id), params=params)
+        return self.request(Route('GET', '/store/listings/{listing_id}', listing_id=listing_id), params=params)
 
     def get_store_listing_by_sku(
         self,
@@ -3521,7 +3525,7 @@ class HTTPClient:
         country_code: Optional[str] = None,
         payment_source_id: Optional[Snowflake] = None,
         localize: bool = True,
-    ) -> Response[store.StoreListing]:
+    ) -> Response[store.PublicStoreListing]:
         params = {}
         if country_code:
             params['country_code'] = country_code
@@ -3539,7 +3543,7 @@ class HTTPClient:
         country_code: Optional[str] = None,
         payment_source_id: Optional[int] = None,
         localize: bool = True,
-    ) -> Response[List[store.StoreListing]]:
+    ) -> Response[List[store.PrivateStoreListing]]:
         params = {}
         if country_code:
             params['country_code'] = country_code
@@ -3599,7 +3603,7 @@ class HTTPClient:
         country_code: Optional[str] = None,
         payment_source_id: Optional[int] = None,
         localize: bool = True,
-    ) -> Response[List[store.StoreListing]]:
+    ) -> Response[List[store.PublicStoreListing]]:
         params = {'application_id': app_id}
         if country_code:
             params['country_code'] = country_code
@@ -3617,7 +3621,7 @@ class HTTPClient:
         country_code: Optional[str] = None,
         payment_source_id: Optional[int] = None,
         localize: bool = True,
-    ) -> Response[store.StoreListing]:
+    ) -> Response[store.PublicStoreListing]:
         params = {}
         if country_code:
             params['country_code'] = country_code
@@ -3637,7 +3641,7 @@ class HTTPClient:
         country_code: Optional[str] = None,
         payment_source_id: Optional[Snowflake] = None,
         localize: bool = True,
-    ) -> Response[List[store.StoreListing]]:
+    ) -> Response[List[store.PublicStoreListing]]:
         params: Dict[str, Any] = {'application_ids': app_ids}
         if country_code:
             params['country_code'] = country_code
@@ -3650,14 +3654,14 @@ class HTTPClient:
 
     def create_store_listing(
         self, application_id: Snowflake, sku_id: Snowflake, payload: dict
-    ) -> Response[store.StoreListing]:
+    ) -> Response[store.PrivateStoreListing]:
         return self.request(
             Route('POST', '/store/listings'),
             json={**payload, 'application_id': application_id, 'sku_id': sku_id},
             super_properties_to_track=True,
         )
 
-    def edit_store_listing(self, listing_id: Snowflake, payload: dict) -> Response[store.StoreListing]:
+    def edit_store_listing(self, listing_id: Snowflake, payload: dict) -> Response[store.PrivateStoreListing]:
         return self.request(
             Route('PATCH', '/store/listings/{listing_id}', listing_id=listing_id),
             json=payload,
@@ -3671,7 +3675,7 @@ class HTTPClient:
         country_code: Optional[str] = None,
         payment_source_id: Optional[Snowflake] = None,
         localize: bool = True,
-    ) -> Response[store.SKU]:
+    ) -> Response[store.PrivateSKU]:
         params = {}
         if country_code:
             params['country_code'] = country_code
@@ -3682,7 +3686,7 @@ class HTTPClient:
 
         return self.request(Route('GET', '/store/skus/{sku_id}', sku_id=sku_id), params=params)
 
-    def edit_sku(self, sku_id: Snowflake, payload: dict) -> Response[store.SKU]:
+    def edit_sku(self, sku_id: Snowflake, payload: dict) -> Response[store.PrivateSKU]:
         return self.request(
             Route('PATCH', '/store/skus/{sku_id}', sku_id=sku_id), json=payload, super_properties_to_track=True
         )
@@ -4337,6 +4341,12 @@ class HTTPClient:
     def get_user(self, user_id: Snowflake) -> Response[user.APIUser]:
         return self.request(Route('GET', '/users/{user_id}', user_id=user_id))
 
+    def get_user_named(self, username: str, dicriminator: Optional[str] = None) -> Response[user.APIUser]:
+        params = {}
+        if dicriminator:
+            params['discriminator'] = dicriminator
+        return self.request(Route('GET', '/users/username/{username}', username=username), params=params)
+
     def get_user_profile(
         self,
         user_id: Snowflake,
@@ -4446,6 +4456,15 @@ class HTTPClient:
         return self.request(
             Route('GET', '/channels/{channel_id}/application-commands/search', channel_id=channel_id), params=params
         )
+
+    def guild_application_command_index(self, guild_id: Snowflake) -> Response[command.GuildApplicationCommandIndex]:
+        return self.request(Route('GET', '/guilds/{guild_id}/application-command-index', guild_id=guild_id))
+
+    def channel_application_command_index(self, channel_id: Snowflake) -> Response[command.ApplicationCommandIndex]:
+        return self.request(Route('GET', '/channels/{channel_id}/application-command-index', channel_id=channel_id))
+
+    def user_application_command_index(self) -> Response[command.ApplicationCommandIndex]:
+        return self.request(Route('GET', '/users/@me/application-command-index'))
 
     def interact(
         self,

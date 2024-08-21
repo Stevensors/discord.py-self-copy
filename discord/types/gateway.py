@@ -24,7 +24,7 @@ DEALINGS IN THE SOFTWARE.
 
 from __future__ import annotations
 
-from typing import Generic, List, Literal, Optional, TypedDict, TypeVar, Union
+from typing import Generic, Dict, List, Literal, Optional, Tuple, TypedDict, TypeVar, Union
 from typing_extensions import NotRequired, Required
 
 from .activity import Activity, BasePresenceUpdate, PartialPresenceUpdate, StatusType
@@ -49,7 +49,7 @@ from .scheduled_event import GuildScheduledEvent
 from .snowflake import Snowflake
 from .sticker import GuildSticker
 from .subscriptions import PremiumGuildSubscriptionSlot
-from .threads import Thread, ThreadMember
+from .threads import BaseThreadMember, Thread, ThreadMember
 from .user import (
     Connection,
     FriendSuggestion,
@@ -61,13 +61,13 @@ from .user import (
     User,
     UserGuildSettings,
 )
-from .voice import GuildVoiceState, VoiceState
+from .voice import GuildVoiceState, PrivateVoiceState, VoiceState
 
 T = TypeVar('T')
 
 
 class UserPresenceUpdateEvent(BasePresenceUpdate):
-    last_modified: int
+    ...
 
 
 PresenceUpdateEvent = Union[PartialPresenceUpdate, UserPresenceUpdateEvent]
@@ -315,8 +315,15 @@ class ThreadMembersUpdate(TypedDict):
     removed_member_ids: NotRequired[List[Snowflake]]
 
 
+class ThreadMemberListUpdateEvent(TypedDict):
+    guild_id: Snowflake
+    thread_id: Snowflake
+    members: List[BaseThreadMember]
+
+
 class GuildMemberAddEvent(MemberWithUser):
     guild_id: Snowflake
+    presence: NotRequired[BasePresenceUpdate]
 
 
 class SnowflakeUser(TypedDict):
@@ -428,7 +435,7 @@ class _GuildScheduledEventUsersEvent(TypedDict):
 
 GuildScheduledEventUserAdd = GuildScheduledEventUserRemove = _GuildScheduledEventUsersEvent
 
-VoiceStateUpdateEvent = GuildVoiceState
+VoiceStateUpdateEvent = Union[GuildVoiceState, PrivateVoiceState]
 
 
 class VoiceServerUpdateEvent(TypedDict):
@@ -559,13 +566,16 @@ class PartialUpdateChannel(TypedDict):
 class PassiveUpdateEvent(TypedDict):
     guild_id: Snowflake
     channels: List[PartialUpdateChannel]
-    voice_states: NotRequired[List[GuildVoiceState]]
+    voice_states: NotRequired[List[VoiceState]]
     members: NotRequired[List[MemberWithUser]]
 
 
 class GuildApplicationCommandIndexUpdateEvent(TypedDict):
     guild_id: Snowflake
-    application_command_counts: ApplicationCommandCounts
+    # All these fields are dead
+    # application_command_counts: ApplicationCommandCounts
+    # bot_users: List[PartialUser]
+    # version: Snowflake
 
 
 class UserNoteUpdateEvent(TypedDict):
@@ -607,6 +617,23 @@ class CallDeleteEvent(TypedDict):
     unavailable: NotRequired[bool]
 
 
+class BaseGuildSubscribePayload(TypedDict, total=False):
+    typing: bool
+    threads: bool
+    activities: bool
+    member_updates: bool
+    members: List[Snowflake]
+    channels: Dict[Snowflake, List[Tuple[int, int]]]
+    thread_member_lists: List[Snowflake]
+
+
+class GuildSubscribePayload(BaseGuildSubscribePayload):
+    guild_id: Snowflake
+
+
+BulkGuildSubscribePayload = Dict[Snowflake, BaseGuildSubscribePayload]
+
+
 class _GuildMemberListGroup(TypedDict):
     id: Union[Snowflake, Literal['online', 'offline']]
 
@@ -628,7 +655,7 @@ GuildMemberListItem = Union[_GuildMemberListGroupItem, _GuildMemberListMemberIte
 
 class GuildMemberListSyncOP(TypedDict):
     op: Literal['SYNC']
-    range: tuple[int, int]
+    range: Tuple[int, int]
     items: List[GuildMemberListItem]
 
 
@@ -651,7 +678,7 @@ class GuildMemberListDeleteOP(TypedDict):
 
 class GuildMemberListInvalidateOP(TypedDict):
     op: Literal['INVALIDATE']
-    range: tuple[int, int]
+    range: Tuple[int, int]
 
 
 GuildMemberListOP = Union[

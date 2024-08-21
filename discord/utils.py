@@ -73,7 +73,6 @@ import sys
 from threading import Timer
 import types
 import warnings
-import logging
 
 import yarl
 
@@ -886,11 +885,16 @@ class SnowflakeList(_SnowflakeListBase):
 
     if TYPE_CHECKING:
 
-        def __init__(self, data: Iterable[int], *, is_sorted: bool = False):
+        def __init__(self, data: Optional[Iterable[int]] = None, *, is_sorted: bool = False):
             ...
 
-    def __new__(cls, data: Iterable[int], *, is_sorted: bool = False) -> Self:
-        return array.array.__new__(cls, 'Q', data if is_sorted else sorted(data))  # type: ignore
+    def __new__(cls, data: Optional[Iterable[int]] = None, *, is_sorted: bool = False) -> Self:
+        if data:
+            return array.array.__new__(cls, 'Q', data if is_sorted else sorted(data))  # type: ignore
+        return array.array.__new__(cls, 'Q')  # type: ignore
+
+    def __contains__(self, element: int) -> bool:
+        return self.has(element)
 
     def add(self, element: int) -> None:
         i = bisect_left(self, element)
@@ -1355,6 +1359,7 @@ def format_dt(dt: datetime.datetime, /, style: Optional[TimestampStyle] = None) 
     return f'<t:{int(dt.timestamp())}:{style}>'
 
 
+@deprecated()
 def set_target(
     items: Iterable[ApplicationCommand],
     *,
@@ -1368,6 +1373,10 @@ def set_target(
 
     Suppresses all AttributeErrors so you can pass multiple types of commands and
     not worry about which elements support which parameter.
+
+    .. versionadded:: 2.0
+
+    .. deprecated:: 2.1
 
     Parameters
     -----------
@@ -1437,29 +1446,38 @@ class ExpiringString(collections.UserString):
         self._timer.cancel()
 
 
-async def _get_info(session: ClientSession) -> Tuple[Dict[str, Any], str]:
-    # Example of the response from the URL used: {"browser":{"os":{"type":"Windows","version":"10"},"type":"Chrome","user_agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36","version":"115.0.0.0"},"client":{"build_hash":"958c14cce43dc94338a86831f32e7783916c73e7","build_number":218604,"release_channel":"stable","type":"web","version":null}}
-    # Seems like there's no 'properties' nor 'encoded'. Exception will be thrown anyways so might as well skip
-    # for _ in range(3):
-    #     try:
-    #         async with session.post('https://cordapi.dolfi.es/api/v2/properties/web', timeout=5) as resp:
-    #             json = await resp.json()
-    #             return json['properties'], json['encoded']
-    #     except Exception:
-    #         continue
+FALLBACK_BUILD_NUMBER = 9999
+FALLBACK_BROWSER_VERSION = '125.0.0.0'
+_CLIENT_ASSET_REGEX = re.compile(r'assets/([a-z0-9.]+)\.js')
+_BUILD_NUMBER_REGEX = re.compile(r'build_number:"(\d+)"')
 
-    # _log.warning('Info API down. Falling back to manual fetching...')
-    _log.info('Building super properties...')
-    ua = await _get_user_agent(session)
-    bn = await _get_build_number(session)
-    bv = _get_browser_version(ua)
+
+async def _get_info(session: ClientSession) -> Tuple[Dict[str, Any], str]:
+    try:
+        async with session.post('https://cordapi.dolfi.es/api/v2/properties/web', timeout=5) as resp:
+            json = await resp.json()
+            return json['properties'], json['encoded']
+    except Exception:
+        _log.info('Info API temporarily down. Falling back to manual retrieval...')
+
+    try:
+        bn = await _get_build_number(session)
+    except Exception:
+        _log.critical('Could not retrieve client build number. Falling back to hardcoded value...')
+        bn = FALLBACK_BUILD_NUMBER
+
+    try:
+        bv = await _get_browser_version(session)
+    except Exception:
+        _log.critical('Could not retrieve browser version. Falling back to hardcoded value...')
+        bv = FALLBACK_BROWSER_VERSION
 
     properties = {
         'os': 'Windows',
         # 'browser': 'Chrome',
         'browser': 'Discord Client',
         'device': '',
-        'browser_user_agent': ua,
+        'browser_user_agent': _get_user_agent(bv),
         'browser_version': bv,
         'os_version': '10',
         'os_arch': 'x64',
@@ -1476,38 +1494,39 @@ async def _get_info(session: ClientSession) -> Tuple[Dict[str, Any], str]:
     return properties, b64encode(_to_json(properties).encode()).decode('utf-8')
 
 
-async def _get_build_number(session: ClientSession) -> int:  # Thank you Discord-S.C.U.M
+async def _get_build_number(session: ClientSession) -> int:
     """Fetches client build number"""
-    default_build_number = 9999
-    try:
-        login_page_request = await session.get('https://discord.com/login', timeout=7)
-        login_page = await login_page_request.text()
-        build_url = 'https://discord.com/assets/' + re.compile(r'assets/+([a-z0-9.]+)\.js').findall(login_page)[-2] + '.js'
-        build_request = await session.get(build_url, timeout=7)
-        build_file = await build_request.text()
-        build_find = re.findall(r'Build Number:\D+"(\d+)"', build_file)
-        return int(build_find[0]) if build_find else default_build_number
-    except asyncio.TimeoutError:
-        _log.critical('Could not fetch client build number. Falling back to hardcoded value...')
-        return default_build_number
+    async with session.get('https://discord.com/login') as resp:
+        app = await resp.text()
+        assets = _CLIENT_ASSET_REGEX.findall(app)
+        if not assets:
+            raise RuntimeError('Could not find client asset files')
+
+    for asset in assets[::-1]:
+        async with session.get(f'https://discord.com/assets/{asset}.js') as resp:
+            build = await resp.text()
+            match = _BUILD_NUMBER_REGEX.search(build)
+            if match is None:
+                continue
+            return int(match.group(1))
+
+    return RuntimeError('Could not find client build number')
 
 
-async def _get_user_agent(session: ClientSession) -> str:
+async def _get_browser_version(session: ClientSession) -> str:
+    """Fetches the latest Windows 10/Chrome major browser version."""
+    async with session.get(
+        'https://versionhistory.googleapis.com/v1/chrome/platforms/win/channels/stable/versions'
+    ) as response:
+        data = await response.json()
+        major = data['versions'][0]['version'].split('.')[0]
+        return f'{major}.0.0.0'
+
+
+def _get_user_agent(version: str) -> str:
     """Fetches the latest Windows 10/Chrome user-agent."""
-    try:
-        request = await session.request('GET', 'https://jnrbsn.github.io/user-agents/user-agents.json', timeout=7)
-        response = json.loads(await request.text())
-        return response[0]
-    except asyncio.TimeoutError:
-        _log.critical('Could not fetch user-agent. Falling back to hardcoded value...')
-        return (
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36'
-        )
-
-
-def _get_browser_version(user_agent: str) -> str:
-    """Fetches the latest Windows 10/Chrome version."""
-    return user_agent.split('Chrome/')[1].split()[0]
+    # Because of [user agent reduction](https://www.chromium.org/updates/ua-reduction/), we just need the major version now :)
+    return f'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{version} Safari/537.36'
 
 
 def is_docker() -> bool:

@@ -817,18 +817,14 @@ Guilds
     :param after: A list of stickers after the update.
     :type after: Sequence[:class:`GuildSticker`]
 
-.. function:: on_application_command_counts_update(guild, before, after)
+.. function:: on_application_command_index_update(guild)
 
-    Called when a :class:`Guild`\'s application command counts are updated.
+    Called when a :class:`Guild`\'s application command index is updated.
 
-    .. versionadded:: 2.0
+    .. versionadded:: 2.1
 
     :param guild: The guild who got their application command counts updated.
     :type guild: :class:`Guild`
-    :param before: A namedtuple of application command counts before the update.
-    :type before: :class:`ApplicationCommandCounts`
-    :param after: A namedtuple of application command counts after the update.
-    :type after: :class:`ApplicationCommandCounts`
 
 .. function:: on_audit_log_entry_create(entry)
 
@@ -979,12 +975,33 @@ Members
 ~~~~~~~~
 
 .. function:: on_member_join(member)
-              on_member_remove(member)
 
-    Called when a :class:`Member` join or leaves a :class:`Guild`.
+    Called when a :class:`Member` joins a :class:`Guild`.
 
-    :param member: The member who joined or left.
+    :param member: The member who joined.
     :type member: :class:`Member`
+
+.. function:: on_member_remove(member)
+
+    Called when a :class:`Member` leaves a :class:`Guild`.
+
+    If the guild or member could not be found in the internal cache this event
+    will not be called, you may use :func:`on_raw_member_remove` instead.
+
+    :param member: The member who left.
+    :type member: :class:`Member`
+
+.. function:: on_raw_member_remove(payload)
+
+    Called when a :class:`Member` leaves a :class:`Guild`.
+
+    Unlike :func:`on_member_remove`
+    this is called regardless of the guild or member being in the internal cache.
+
+    .. versionadded:: 2.1
+
+    :param payload: The raw event payload data.
+    :type payload: :class:`RawMemberRemoveEvent`
 
 .. function:: on_member_update(before, after)
 
@@ -3872,6 +3889,12 @@ of :class:`enum.Enum`.
 
     Represents the user's Discord Nitro subscription type.
 
+    .. attribute:: none
+
+        The user does not have a Discord Nitro subscription.
+
+        .. versionadded:: 2.0
+
     .. attribute:: nitro
 
         Represents the new, full Discord Nitro.
@@ -3959,6 +3982,12 @@ of :class:`enum.Enum`.
     .. attribute:: ideal
 
         The payment source is an iDEAL account.
+
+    .. attribute:: cash_app
+
+        The payment source is a Cash App account.
+
+        .. versionadded:: 2.1
 
 .. class:: PaymentGateway
 
@@ -4223,6 +4252,83 @@ of :class:`enum.Enum`.
 
         The entitlement is an application subscription.
 
+.. class:: RefundReason
+
+    Represents the reason for a refund.
+
+    .. versionadded:: 2.1
+
+    .. attribute:: other
+
+        The refund is due to another reason.
+
+    .. attribute:: gifting_refund
+
+        The refund is due to an unwanted gift.
+
+    .. attribute:: buyers_remorse
+
+        The refund is due to buyer's remorse.
+
+    .. attribute:: wrong_purchase
+
+        The refund is due to a wrong purchase.
+
+    .. attribute:: forgot_to_cancel
+
+        The refund is due to forgetting to cancel a subscription.
+
+    .. attribute:: premium_guild_cooldown
+
+        The refund is due to a premium guild (boosting) cooldown.
+
+    .. attribute:: user_confusion
+
+        The refund is due to user confusion.
+
+    .. attribute:: want_to_switch_tiers
+
+        The refund is due to wanting to switch premium (Nitro) tiers.
+
+    .. attribute:: dont_need
+
+        The refund is due to not needing the purchase.
+
+.. class:: RefundDisqualificationReason
+
+    Represents the reason for a refund disqualification.
+
+    .. versionadded:: 2.1
+
+    .. attribute:: other
+
+        The purchase is disqualified from a refund due to another reason.
+
+    .. attribute:: already_refunded
+
+        The purchase is disqualified from a refund because it has already been refunded.
+
+    .. attribute:: not_user_refundable_type
+
+        The purchase is disqualified from a refund because it is not a user refundable type.
+        The user must contact Discord support to request a refund.
+
+    .. attribute:: past_refundable_date
+
+        The purchase is disqualified from a refund because it is past the refundable date.
+
+    .. attribute:: entitlement_already_consumed
+
+        The purchase is disqualified from a refund because the purchased entitlement has already been consumed.
+
+    .. attribute:: already_refunded_premium
+
+        The purchase is disqualified from a refund because the user has already refunded a premium (Nitro) purchase.
+
+    .. attribute:: already_refunded_premium_guild
+
+        The purchase is disqualified from a refund because the user has already refunded a premium guild (boosting) purchase.
+
 .. class:: SKUType
 
     Represents the type of a SKU.
@@ -4270,6 +4376,40 @@ of :class:`enum.Enum`.
     .. attribute:: vip_access
 
         The SKU is available to VIP users only.
+
+.. class:: SKUProductLine
+
+    Represents the product line of a SKU.
+
+    .. versionadded:: 2.1
+
+    .. attribute:: premium
+
+        The SKU is a premium (Nitro) product.
+
+    .. attribute:: premium_guild
+
+        The SKU is a premium guild product.
+
+    .. attribute:: iap
+
+        The SKU is an embedded in-app purchase.
+
+    .. attribute:: guild_role
+
+        The SKU is a guild role subscription.
+
+    .. attribute:: guild_product
+
+        The SKU is a guild product.
+
+    .. attribute:: application
+
+        The SKU is an application subscription.
+
+    .. attribute:: collectible
+
+        The SKU is a collectible avatar decoration or profile effect.
 
 .. class:: SKUFeature
 
@@ -5055,6 +5195,12 @@ of :class:`enum.Enum`.
 
         The ``en-US`` locale.
 
+    .. attribute:: arabic
+
+        The ``ar`` locale.
+
+        .. versionadded:: 2.1
+
     .. attribute:: british_english
 
         The ``en-GB`` locale.
@@ -5078,12 +5224,6 @@ of :class:`enum.Enum`.
     .. attribute:: czech
 
         The ``cs`` locale.
-
-    .. attribute:: indonesian
-
-        The ``id`` locale.
-
-        .. versionadded:: 2.0
 
     .. attribute:: danish
 
@@ -5117,6 +5257,10 @@ of :class:`enum.Enum`.
 
         The ``hu`` locale.
 
+    .. attribute:: indonesian
+
+        The ``id`` locale.
+
     .. attribute:: italian
 
         The ``it`` locale.
@@ -5128,6 +5272,12 @@ of :class:`enum.Enum`.
     .. attribute:: korean
 
         The ``ko`` locale.
+
+    .. attribute:: latin_american_spanish
+
+        The ``es-419`` locale.
+
+        .. versionadded:: 2.1
 
     .. attribute:: lithuanian
 
@@ -6693,6 +6843,11 @@ User
     :members:
     :inherited-members:
 
+.. attributetable:: ProfileMetadata
+
+.. autoclass:: ProfileMetadata()
+    :members:
+
 .. attributetable:: ProfileBadge
 
 .. autoclass:: ProfileBadge()
@@ -7186,28 +7341,6 @@ Guild
         The :class:`User` that was banned.
 
         :type: :class:`User`
-
-.. class:: ApplicationCommandCounts
-
-    A namedtuple which represents the application command counts for a guild.
-
-    .. attribute:: chat_input
-
-        The number of chat input (slash) commands.
-
-        :type: :class:`int`
-
-    .. attribute:: user
-
-        The number of user commands.
-
-        :type: :class:`int`
-
-    .. attribute:: message
-
-        The number of message commands.
-
-        :type: :class:`int`
 
 Role
 ~~~~~
@@ -7771,6 +7904,11 @@ RawEvent
 .. attributetable:: RawThreadDeleteEvent
 
 .. autoclass:: RawThreadDeleteEvent()
+    :members:
+
+.. attributetable:: RawMemberRemoveEvent
+
+.. autoclass:: RawMemberRemoveEvent()
     :members:
 
 .. attributetable:: RawMessageAckEvent

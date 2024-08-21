@@ -73,13 +73,11 @@ if TYPE_CHECKING:
     from .state import ConnectionState, Presence
     from .message import Message
     from .role import Role
-    from .types.voice import (
-        GuildVoiceState as GuildVoiceStatePayload,
-        VoiceState as VoiceStatePayload,
-    )
+    from .types.voice import BaseVoiceState as VoiceStatePayload
     from .user import Note
     from .relationship import Relationship
     from .calls import PrivateCall
+    from .enums import PremiumType
 
     VocalGuildChannel = Union[VoiceChannel, StageChannel]
     ConnectableChannel = Union[VocalGuildChannel, DMChannel, GroupChannel]
@@ -146,13 +144,11 @@ class VoiceState:
         'suppress',
     )
 
-    def __init__(
-        self, *, data: Union[VoiceStatePayload, GuildVoiceStatePayload], channel: Optional[ConnectableChannel] = None
-    ):
+    def __init__(self, *, data: VoiceStatePayload, channel: Optional[ConnectableChannel] = None):
         self.session_id: Optional[str] = data.get('session_id')
         self._update(data, channel)
 
-    def _update(self, data: Union[VoiceStatePayload, GuildVoiceStatePayload], channel: Optional[ConnectableChannel]):
+    def _update(self, data: VoiceStatePayload, channel: Optional[ConnectableChannel]):
         self.self_mute: bool = data.get('self_mute', False)
         self.self_deaf: bool = data.get('self_deaf', False)
         self.self_stream: bool = data.get('self_stream', False)
@@ -189,7 +185,7 @@ def flatten_user(cls: T) -> T:
 
         # If it's a slotted attribute or a property, redirect it
         # Slotted members are implemented as member_descriptors in Type.__dict__
-        if not hasattr(value, '__annotations__'):
+        if not hasattr(value, '__annotations__') or isinstance(value, utils.CachedSlotProperty):
             getter = attrgetter('_user.' + attr)
             setattr(cls, attr, property(getter, doc=f'Equivalent to :attr:`User.{attr}`'))
         else:
@@ -294,6 +290,7 @@ class Member(discord.abc.Messageable, discord.abc.Connectable, _UserTag):
         default_avatar: Asset
         avatar: Optional[Asset]
         avatar_decoration: Optional[Asset]
+        avatar_decoration_sku_id: Optional[int]
         note: Note
         relationship: Optional[Relationship]
         is_friend: Callable[[], bool]
@@ -306,6 +303,7 @@ class Member(discord.abc.Messageable, discord.abc.Connectable, _UserTag):
         remove_friend: Callable[[], Awaitable[None]]
         fetch_mutual_friends: Callable[[], Awaitable[List[User]]]
         public_flags: PublicUserFlags
+        premium_type: Optional[PremiumType]
         banner: Optional[Asset]
         accent_color: Optional[Colour]
         accent_colour: Optional[Colour]

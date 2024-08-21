@@ -178,14 +178,50 @@ class Client:
         amounts of guilds. The default is ``True``.
 
         .. versionadded:: 1.5
+    guild_subscriptions: :class:`bool`
+        Whether to subscribe to all guilds at startup.
+        This is required to receive member events and populate the thread cache.
+
+        For larger servers, this is required to receive nearly all events.
+
+        See :doc:`guild_subscriptions` for more information.
+
+        .. versionadded:: 2.1
+
+        .. warning::
+
+            If this is set to ``False``, the following consequences will occur:
+
+            - Large guilds (over 75,000 members) will not dispatch any non-stateful events (e.g. :func:`.on_message`, :func:`.on_reaction_add`, :func:`.on_typing`, etc.)
+            - :attr:`~Guild.threads` will only contain threads the client has joined.
+            - Guilds will not be chunkable and member events (e.g. :func:`.on_member_update`) will not be dispatched.
+                - Most :func:`.on_user_update` occurences will not be dispatched.
+                - The member (:attr:`~Guild.members`) and user (:attr:`~Client.users`) cache will be largely incomplete.
+                - Essentially, only the client user, friends/implicit relationships, voice members, and other subscribed-to users will be cached and dispatched.
+
+            This is useful if you want to control subscriptions manually (see :meth:`Guild.subscribe`) to save bandwidth and memory.
+            Disabling this is not recommended for most use cases.
     request_guilds: :class:`bool`
-        Whether to request guilds at startup. Defaults to True.
+        See ``guild_subscriptions``.
 
         .. versionadded:: 2.0
+
+        .. deprecated:: 2.1
+
+            This is deprecated and will be removed in a future version.
+            Use ``guild_subscriptions`` instead.
     status: Optional[:class:`.Status`]
         A status to start your presence with upon logging on to Discord.
     activity: Optional[:class:`.BaseActivity`]
         An activity to start your presence with upon logging on to Discord.
+    activities: List[:class:`.BaseActivity`]
+        A list of activities to start your presence with upon logging on to Discord. Cannot be sent with ``activity``.
+
+        .. versionadded:: 2.0
+    afk: :class:`bool`
+        Whether to start your session as AFK. Defaults to ``False``.
+
+        .. versionadded:: 2.1
     allowed_mentions: Optional[:class:`AllowedMentions`]
         Control how the client handles mentions by default on every message sent.
 
@@ -324,6 +360,7 @@ class Client:
         if status or activities:
             if status is None:
                 status = getattr(state.settings, 'status', None) or Status.unknown
+            _log.debug('Setting initial presence to %s %s', status, activities)
             self.loop.create_task(self.change_presence(activities=activities, status=status))
 
     @property
@@ -684,11 +721,21 @@ class Client:
         ):
             return  # Nothing changed
 
+        current_activity = None
+        for activity in self.activities:
+            if activity.type != ActivityType.custom:
+                current_activity = activity
+                break
+
+        if new_settings.status == self.client_status and new_settings.custom_activity == current_activity:
+            return  # Nothing changed
+
         status = new_settings.status
-        activities = [a for a in self.activities if a.type != ActivityType.custom]
+        activities = [a for a in self.client_activities if a.type != ActivityType.custom]
         if new_settings.custom_activity is not None:
             activities.append(new_settings.custom_activity)
 
+        _log.debug('Syncing presence to %s %s', status, new_settings.custom_activity)
         await self.change_presence(status=status, activities=activities, edit_settings=False)
 
     # Hooks
@@ -953,7 +1000,7 @@ class Client:
         """
         self._closed = False
         self._ready.clear()
-        self._connection.clear()
+        self._connection.clear(full=True)
         self.http.clear()
 
     async def start(self, token: str, *, reconnect: bool = True) -> None:
@@ -1229,6 +1276,32 @@ class Client:
             activity = getattr(state.settings, 'custom_activity', None)
             activities = (activity,) if activity else activities
         return activities or tuple()
+
+    def is_afk(self) -> bool:
+        """:class:`bool`: Indicates if the client is currently AFK.
+
+        This allows the Discord client to know how to handle push notifications
+        better for you in case you are away from your keyboard.
+
+        .. versionadded:: 2.1
+        """
+        if self.ws:
+            return self.ws.afk
+        return False
+
+    @property
+    def idle_since(self) -> Optional[datetime]:
+        """Optional[:class:`datetime.datetime`]: When the client went idle.
+
+        This indicates that you are truly idle and not just lying.
+
+        .. versionadded:: 2.1
+        """
+        ws = self.ws
+        if ws is None or not ws.idle_since:
+            return None
+
+        return utils.parse_timestamp(ws.idle_since)
 
     @property
     def allowed_mentions(self) -> Optional[AllowedMentions]:
@@ -1606,21 +1679,30 @@ class Client:
     async def change_presence(
         self,
         *,
-        activity: Optional[ActivityTypes] = None,
-        activities: Optional[List[ActivityTypes]] = None,
-        status: Optional[Status] = None,
-        afk: bool = False,
+        activity: Optional[ActivityTypes] = MISSING,
+        activities: List[ActivityTypes] = MISSING,
+        status: Status = MISSING,
+        afk: bool = MISSING,
+        idle_since: Optional[datetime] = MISSING,
         edit_settings: bool = True,
     ) -> None:
         """|coro|
 
         Changes the client's presence.
 
+        .. versionchanged:: 2.1
+
+            The default value for parameters is now the current value.
+            ``None`` is no longer a valid value for most; you must explicitly
+            set it to the default value if you want to reset it.
+
         .. versionchanged:: 2.0
+
             Edits are no longer in place.
             Added option to update settings.
 
         .. versionchanged:: 2.0
+
             This function will now raise :exc:`TypeError` instead of
             ``InvalidArgument``.
 
@@ -1636,55 +1718,82 @@ class Client:
         ----------
         activity: Optional[:class:`.BaseActivity`]
             The activity being done. ``None`` if no activity is done.
-        activities: Optional[List[:class:`.BaseActivity`]]
-            A list of the activities being done. ``None`` if no activities
-            are done. Cannot be sent with ``activity``.
-        status: Optional[:class:`.Status`]
-            Indicates what status to change to. If ``None``, then
-            :attr:`.Status.online` is used.
+        activities: List[:class:`.BaseActivity`]
+            A list of the activities being done. Cannot be sent with ``activity``.
+
+            .. versionadded:: 2.0
+        status: :class:`.Status`
+            Indicates what status to change to.
         afk: :class:`bool`
             Indicates if you are going AFK. This allows the Discord
             client to know how to handle push notifications better
-            for you in case you are actually idle and not lying.
+            for you in case you are away from your keyboard.
+        idle_since: Optional[:class:`datetime.datetime`]
+            When the client went idle. This indicates that you are
+            truly idle and not just lying.
         edit_settings: :class:`bool`
-            Whether to update the settings with the new status and/or
+            Whether to update user settings with the new status and/or
             custom activity. This will broadcast the change and cause
             all connected (official) clients to change presence as well.
+
+            This should be set to ``False`` for idle changes.
+
             Required for setting/editing ``expires_at`` for custom activities.
-            It's not recommended to change this, as setting it to ``False`` causes undefined behavior.
+            It's not recommended to change this, as setting it to ``False``
+            can cause undefined behavior.
 
         Raises
         ------
         TypeError
             The ``activity`` parameter is not the proper type.
             Both ``activity`` and ``activities`` were passed.
+        ValueError
+            More than one custom activity was passed.
         """
-        if activity and activities:
+        if activity is not MISSING and activities is not MISSING:
             raise TypeError('Cannot pass both activity and activities')
-        activities = activities or activity and [activity]
-        if activities is None:
-            activities = []
 
-        if status is None:
-            status = Status.online
-        elif status is Status.offline:
+        skip_activities = False
+        if activities is MISSING:
+            if activity is not MISSING:
+                activities = [activity] if activity else []
+            else:
+                activities = list(self.client_activities)
+                skip_activities = True
+        else:
+            activities = activities or []
+
+        skip_status = status is MISSING
+        if status is MISSING:
+            status = self.client_status
+        if status is Status.offline:
             status = Status.invisible
 
-        await self.ws.change_presence(status=status, activities=activities, afk=afk)
+        if afk is MISSING:
+            afk = self.ws.afk if self.ws else False
 
-        if edit_settings:
-            custom_activity = None
+        if idle_since is MISSING:
+            since = self.ws.idle_since if self.ws else 0
+        else:
+            since = int(idle_since.timestamp() * 1000) if idle_since else 0
 
+        custom_activity = None
+        if not skip_activities:
             for activity in activities:
                 if getattr(activity, 'type', None) is ActivityType.custom:
+                    if custom_activity is not None:
+                        raise ValueError('More than one custom activity was passed')
                     custom_activity = activity
 
+        await self.ws.change_presence(status=status, activities=activities, afk=afk, since=since)
+
+        if edit_settings and self.settings:
             payload: Dict[str, Any] = {}
-            if status != getattr(self.settings, 'status', None):
+            if not skip_status and status != self.settings.status:
                 payload['status'] = status
-            if custom_activity != getattr(self.settings, 'custom_activity', None):
+            if not skip_activities and custom_activity != self.settings.custom_activity:
                 payload['custom_activity'] = custom_activity
-            if payload and self.settings:
+            if payload:
                 await self.settings.edit(**payload)
 
     async def change_voice_state(
@@ -1961,7 +2070,6 @@ class Client:
         HTTPException
             Leaving the guild failed.
         """
-        lurking = lurking if lurking is not MISSING else MISSING
         if lurking is MISSING:
             attr = getattr(guild, 'joined', lurking)
             if attr is not MISSING:
@@ -1969,7 +2077,7 @@ class Client:
             elif (new_guild := self._connection._get_guild(guild.id)) is not None:
                 lurking = not new_guild.is_joined()
 
-        await self.http.leave_guild(guild.id, lurking=lurking)
+        await self.http.leave_guild(guild.id, lurking=lurking or False)
 
     async def fetch_stage_instance(self, channel_id: int, /) -> StageInstance:
         """|coro|
@@ -2095,6 +2203,27 @@ class Client:
             guild_scheduled_event_id=scheduled_event_id,
         )
         return Invite.from_incomplete(state=self._connection, data=data)
+
+    async def create_invite(self) -> Invite:
+        """|coro|
+
+        Creates a new friend :class:`.Invite`.
+
+        .. versionadded:: 2.0
+
+        Raises
+        ------
+        HTTPException
+            Creating the invite failed.
+
+        Returns
+        --------
+        :class:`.Invite`
+            The created friend invite.
+        """
+        state = self._connection
+        data = await state.http.create_friend_invite()
+        return Invite.from_incomplete(state=state, data=data)
 
     async def accept_invite(self, url: Union[Invite, str], /) -> Invite:
         """|coro|
@@ -2253,11 +2382,6 @@ class Client:
 
             This method is an API call. If you have member cache enabled, consider :meth:`get_user` instead.
 
-        .. warning::
-
-            This API route is not well-used by the Discord client and may increase your chances at getting detected.
-            Consider :meth:`fetch_user_profile` if you share a guild/relationship with the user.
-
         .. versionchanged:: 2.0
 
             ``user_id`` parameter is now positional-only.
@@ -2280,6 +2404,69 @@ class Client:
             The user you requested.
         """
         data = await self.http.get_user(user_id)
+        return User(state=self._connection, data=data)
+
+    @overload
+    async def fetch_user_named(self, user: str, /) -> User:
+        ...
+
+    @overload
+    async def fetch_user_named(self, username: str, discriminator: str, /) -> User:
+        ...
+
+    async def fetch_user_named(self, *args: str) -> User:
+        """|coro|
+
+        Retrieves a :class:`discord.User` based on their name or legacy username.
+        You do not have to share any guilds with the user to get this information,
+        however you must be able to add them as a friend.
+
+        This function can be used in multiple ways.
+
+        .. versionadded:: 2.1
+
+        .. code-block:: python
+
+            # Passing a username
+            await client.fetch_user_named('jake')
+
+            # Passing a legacy user:
+            await client.fetch_user_named('Jake#0001')
+
+            # Passing a legacy username and discriminator:
+            await client.fetch_user_named('Jake', '0001')
+
+        Parameters
+        -----------
+        user: :class:`str`
+            The user to send the friend request to.
+        username: :class:`str`
+            The username of the user to send the friend request to.
+        discriminator: :class:`str`
+            The discriminator of the user to send the friend request to.
+
+        Raises
+        -------
+        Forbidden
+            Not allowed to send a friend request to this user.
+        HTTPException
+            Fetching the user failed.
+        TypeError
+            More than 2 parameters or less than 1 parameter was passed.
+
+        Returns
+        --------
+        :class:`discord.User`
+            The user you requested.
+        """
+        if len(args) == 1:
+            username, _, discrim = args[0].partition('#')
+        elif len(args) == 2:
+            username, discrim = args
+        else:
+            raise TypeError(f'fetch_user_named() takes 1 or 2 arguments but {len(args)} were given')
+
+        data = await self.http.get_user_named(username, discrim)
         return User(state=self._connection, data=data)
 
     async def fetch_user_profile(
@@ -2966,10 +3153,13 @@ class Client:
         -----------
         \*recipients: :class:`~discord.abc.Snowflake`
             An argument :class:`list` of :class:`discord.User` to have in
-            your group.
+            your group. Groups cannot be created with only one person,
+            but they can be created with zero people.
 
         Raises
         -------
+        TypeError
+            Only one recipient was given.
         HTTPException
             Failed to create the group direct message.
 
@@ -2978,6 +3168,9 @@ class Client:
         :class:`.GroupChannel`
             The new group channel.
         """
+        if len(recipients) == 1:
+            raise TypeError('Cannot create a group with only one recipient')
+
         users: List[_Snowflake] = [u.id for u in recipients]
         state = self._connection
         data = await state.http.start_group(users)
@@ -5182,6 +5375,11 @@ class Client:
         ------
         HTTPException
             Joining the hub or requesting the verification code failed.
+
+        Returns
+        --------
+        Optional[:class:`.Guild`]
+            The joined hub, if a code was provided.
         """
         state = self._connection
 
