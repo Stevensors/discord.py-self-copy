@@ -1,7 +1,7 @@
 discord.py-self
 ================
 
-.. image:: https://img.shields.io/endpoint?url=https%3A%2F%2Frunkit.io%2Fdamiankrawczyk%2Ftelegram-badge%2Fbranches%2Fmaster%3Furl%3Dhttps%3A%2F%2Ft.me%2Fdpy_self
+.. image:: https://img.shields.io/endpoint?color=neon&url=https%3A%2F%2Ftg.sumanjay.workers.dev%2Fdpy_self
    :target: https://t.me/dpy_self
    :alt: Telegram chat
 .. image:: https://img.shields.io/pypi/v/discord.py-self.svg
@@ -56,6 +56,13 @@ Installing
 **Python 3.8 or higher is required.**
 
 To install the library without full voice support, you can just run the following command:
+
+.. note::
+
+    A `Virtual Environment <https://docs.python.org/3/library/venv.html>`__ is recommended to install
+    the library, especially on Linux where the system Python is externally managed and restricts which
+    packages you can install on it.
+
 
 .. code:: sh
 

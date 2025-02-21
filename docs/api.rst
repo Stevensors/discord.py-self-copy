@@ -516,13 +516,17 @@ Billing
 
     .. versionadded:: 2.0
 
+    .. versionchanged:: 2.1
+
+        The type of the ``query`` parameter was corrected from ``str`` to ``Mapping[str, str]``.
+
     :param payment_source_type: The payment source type.
     :type payment_source_type: :class:`PaymentSourceType`
-    :param path: The path of the callback.
+    :param path: The URL path of the callback.
     :type path: :class:`str`
-    :param query: The query of the callback.
-    :type query: :class:`str`
-    :param state: The state of the callback.
+    :param query: The URL query parameters of the callback.
+    :type query: Mapping[:class:`str`, :class:`str`]
+    :param state: A hash to verify the callback.
     :type state: :class:`str`
 
 Entitlements
@@ -713,14 +717,20 @@ Notes
 OAuth2
 ~~~~~~~
 
-.. function:: on_oauth2_token_revoke(token)
+.. function:: on_oauth2_token_revoke(token, application_id)
 
     Called when an authorized application is revoked.
 
     .. versionadded:: 2.0
 
+    .. versionchanged:: 2.1
+
+        The ``application_id`` parameter was added.
+
     :param token: The token that was revoked.
     :type token: :class:`str`
+    :param application_id: The application ID that was revoked.
+    :type application_id: :class:`int`
 
 Calls
 ~~~~~
@@ -1040,7 +1050,7 @@ Members
 
 .. function:: on_member_ban(guild, user)
 
-    Called when user gets banned from a :class:`Guild`.
+    Called when a user gets banned from a :class:`Guild`.
 
     :param guild: The guild the user got banned from.
     :type guild: :class:`Guild`
@@ -1187,7 +1197,7 @@ Messages
     will return a :class:`Message` object that represents the message before the content was modified.
 
     Due to the inherently raw nature of this event, the data parameter coincides with
-    the raw data given by the :ddocs:`gateway <topics/gateway#message-update>`.
+    the raw data given by the :ddocs:`gateway <topics/gateway-events#message-update>`.
 
     Since the data payload can be partial, care must be taken when accessing stuff in the dictionary.
     One example of a common case of partial data is when the ``'content'`` key is inaccessible. This
@@ -1253,6 +1263,43 @@ Messages
     :param message_id: The ID of the message that was deleted.
     :type message_id: :class:`int`
 
+Polls
+~~~~~~
+
+.. function:: on_poll_vote_add(user, answer)
+              on_poll_vote_remove(user, answer)
+
+    Called when a :class:`Poll` gains or loses a vote. If the ``user`` or ``answer``'s poll
+    parent message are not cached then this event will not be called.
+
+    .. note::
+
+        If the poll allows multiple answers and the user removes or adds multiple votes, this
+        event will be called as many times as votes that are added or removed.
+
+    .. versionadded:: 2.1
+
+    :param user: The user that performed the action.
+    :type user: Union[:class:`User`, :class:`Member`]
+    :param answer: The answer the user voted or removed their vote from.
+    :type answer: :class:`PollAnswer`
+
+.. function:: on_raw_poll_vote_add(payload)
+              on_raw_poll_vote_remove(payload)
+
+    Called when a :class:`Poll` gains or loses a vote. Unlike :func:`on_poll_vote_add` and :func:`on_poll_vote_remove`
+    this is called regardless of the state of the internal user and message cache.
+
+    .. note::
+
+        If the poll allows multiple answers and the user removes or adds multiple votes, this
+        event will be called as many times as votes that are added or removed.
+
+    .. versionadded:: 2.1
+
+    :param payload: The raw event payload data.
+    :type payload: :class:`RawPollVoteActionEvent`
+
 Reactions
 ~~~~~~~~~~
 
@@ -1265,6 +1312,12 @@ Reactions
     .. note::
 
         To get the :class:`Message` being reacted, access it via :attr:`Reaction.message`.
+
+    .. warning::
+
+        This event does not have a way of differentiating whether a reaction is a
+        burst reaction (also known as "super reaction") or not. If you need this,
+        consider using :func:`on_raw_reaction_add` instead.
 
     :param reaction: The current state of the reaction.
     :type reaction: :class:`Reaction`
@@ -1284,6 +1337,12 @@ Reactions
     .. note::
 
         Consider using :func:`on_raw_reaction_remove` if you need this and do not have a complete member cache.
+
+    .. warning::
+
+        This event does not have a way of differentiating whether a reaction is a
+        burst reaction (also known as "super reaction") or not. If you need this,
+        consider using :func:`on_raw_reaction_remove` instead.
 
     :param reaction: The current state of the reaction.
     :type reaction: :class:`Reaction`
@@ -1728,6 +1787,12 @@ of :class:`enum.Enum`.
 
         .. versionadded:: 2.0
 
+    .. attribute:: media
+
+        A media channel.
+
+        .. versionadded:: 2.1
+
 .. class:: MessageType
 
     Specifies the type of :class:`Message`. This is used to denote if a message
@@ -1912,6 +1977,42 @@ of :class:`enum.Enum`.
 
         .. versionadded:: 2.0
 
+    .. attribute:: guild_incident_alert_mode_enabled
+
+        The system message sent when security actions is enabled.
+
+        .. versionadded:: 2.1
+
+    .. attribute:: guild_incident_alert_mode_disabled
+
+        The system message sent when security actions is disabled.
+
+        .. versionadded:: 2.1
+
+    .. attribute:: guild_incident_report_raid
+
+        The system message sent when a raid is reported.
+
+        .. versionadded:: 2.1
+
+    .. attribute:: guild_incident_report_false_alarm
+
+        The system message sent when a false alarm is reported.
+
+        .. versionadded:: 2.1
+
+    .. attribute:: purchase_notification
+
+        The system message sent when a purchase is made in the guild.
+
+        .. versionadded:: 2.1
+
+    .. attribute:: poll_result
+
+        The system message sent when a poll has closed.
+
+        .. versionadded:: 2.1
+
 .. class:: InviteType
 
     Specifies the type of :class:`Invite`.
@@ -1953,6 +2054,7 @@ of :class:`enum.Enum`.
         The user is a Bug Hunter.
 
         .. versionadded:: 2.0
+
     .. attribute:: mfa_sms
 
         The user has SMS recovery for Multi Factor Authentication enabled.
@@ -1981,15 +2083,12 @@ of :class:`enum.Enum`.
 
         The user is a Team User.
 
-    .. attribute:: partner_or_verification_application
-
-        The user has a partner or verification application.
-
     .. attribute:: system
 
         The user is a system user (i.e. represents Discord officially).
 
         .. versionadded:: 2.0
+
     .. attribute:: has_unread_urgent_messages
 
         The user has an unread system message.
@@ -1998,11 +2097,6 @@ of :class:`enum.Enum`.
 
         The user is a Bug Hunter Level 2.
 
-    .. attribute:: underage_deleted
-
-        The user has been flagged for deletion for being underage.
-
-        .. versionadded:: 2.0
     .. attribute:: verified_bot
 
         The user is a Verified Bot.
@@ -2020,16 +2114,19 @@ of :class:`enum.Enum`.
         The user is a bot that only uses HTTP interactions and is shown in the online member list.
 
         .. versionadded:: 2.0
+
     .. attribute:: spammer
 
         The user is flagged as a spammer by Discord.
 
         .. versionadded:: 2.0
+
     .. attribute:: disable_premium
 
         The user bought premium but has it manually disabled.
 
         .. versionadded:: 2.0
+
     .. attribute:: quarantined
 
         The user is quarantined.
@@ -2041,6 +2138,24 @@ of :class:`enum.Enum`.
         The user is an active developer.
 
         .. versionadded:: 2.0
+
+    .. attribute:: provisional_account
+
+        The user is a provisional account used with the social layer integration.
+
+        .. versionadded:: 2.1
+
+    .. attribute:: collaborator
+
+        The user is a collaborator and is considered staff.
+
+        .. versionadded:: 2.1
+
+    .. attribute:: restricted_collaborator
+
+        The user is a restricted collaborator and is considered staff.
+
+        .. versionadded:: 2.1
 
 .. class:: ActivityType
 
@@ -3068,7 +3183,7 @@ of :class:`enum.Enum`.
         set to an unspecified proxy object with 3 attributes:
 
         - ``automod_rule_name``: The name of the automod rule that was triggered.
-        - ``automod_rule_trigger``: A :class:`AutoModRuleTriggerType` representation of the rule type that was triggered.
+        - ``automod_rule_trigger_type``: A :class:`AutoModRuleTriggerType` representation of the rule type that was triggered.
         - ``channel``: The channel in which the automod rule was triggered.
 
         When this is the action, :attr:`AuditLogEntry.changes` is empty.
@@ -3086,7 +3201,7 @@ of :class:`enum.Enum`.
         set to an unspecified proxy object with 3 attributes:
 
         - ``automod_rule_name``: The name of the automod rule that was triggered.
-        - ``automod_rule_trigger``: A :class:`AutoModRuleTriggerType` representation of the rule type that was triggered.
+        - ``automod_rule_trigger_type``: A :class:`AutoModRuleTriggerType` representation of the rule type that was triggered.
         - ``channel``: The channel in which the automod rule was triggered.
 
         When this is the action, :attr:`AuditLogEntry.changes` is empty.
@@ -3104,7 +3219,7 @@ of :class:`enum.Enum`.
         set to an unspecified proxy object with 3 attributes:
 
         - ``automod_rule_name``: The name of the automod rule that was triggered.
-        - ``automod_rule_trigger``: A :class:`AutoModRuleTriggerType` representation of the rule type that was triggered.
+        - ``automod_rule_trigger_type``: A :class:`AutoModRuleTriggerType` representation of the rule type that was triggered.
         - ``channel``: The channel in which the automod rule was triggered.
 
         When this is the action, :attr:`AuditLogEntry.changes` is empty.
@@ -4070,6 +4185,12 @@ of :class:`enum.Enum`.
     .. attribute:: account_hold
 
         The subscription is on account hold.
+
+    .. attribute:: billing_retry
+
+        The subscription failed to bill and will retry.
+
+        .. versionadded:: 2.1
 
 .. class:: SubscriptionInvoiceStatus
 
@@ -5792,6 +5913,12 @@ of :class:`enum.Enum`.
         The rule will trigger when combined number of role and user mentions
         is greater than the set limit.
 
+    .. attribute:: member_profile
+
+        The rule will trigger when a user's profile contains a keyword.
+
+        .. versionadded:: 2.1
+
 .. class:: AutoModRuleEventType
 
     Represents the event type of an automod rule.
@@ -5801,6 +5928,12 @@ of :class:`enum.Enum`.
     .. attribute:: message_send
 
         The rule will trigger when a message is sent.
+
+    .. attribute:: member_update
+
+        The rule will trigger when a member's profile is updated.
+
+        .. versionadded:: 2.1
 
 .. class:: AutoModRuleActionType
 
@@ -5819,6 +5952,13 @@ of :class:`enum.Enum`.
     .. attribute:: timeout
 
         The rule will timeout a user.
+
+    .. attribute:: block_member_interactions
+
+        Similar to :attr:`timeout`, except the user will be timed out indefinitely.
+        This will request the user to edit it's profile.
+
+        .. versionadded:: 2.1
 
 .. class:: ForumLayoutType
 
@@ -5939,6 +6079,59 @@ of :class:`enum.Enum`.
     .. attribute:: university
 
         An alias for :attr:`college`.
+
+.. class:: PollLayoutType
+
+    Represents how a poll answers are shown
+
+    .. versionadded:: 2.1
+
+    .. attribute:: default
+
+        The default layout.
+
+.. class:: ReactionType
+
+    Represents the type of a reaction.
+
+    .. versionadded:: 2.1
+
+    .. attribute:: normal
+
+        A normal reaction.
+
+    .. attribute:: burst
+
+        A burst reaction, also known as a "super reaction".
+
+.. class:: PurchaseNotificationType
+
+    Represents the type of a purchase notification.
+
+    .. versionadded:: 2.1
+
+    .. attribute:: guild_product
+
+        A guild product was purchased.
+
+
+.. class:: MessageReferenceType
+
+    Represents the type of a message reference.
+
+    .. versionadded:: 2.1
+
+    .. attribute:: reply
+
+        A message reply.
+
+    .. attribute:: forward
+
+        A forwarded message.
+
+    .. attribute:: default
+
+        An alias for :attr:`.reply`.
 
 .. _discord-api-audit-logs:
 
@@ -6561,6 +6754,12 @@ AuditLogDiff
 
         The trigger for the automod rule.
 
+        .. note ::
+
+            The :attr:`~AutoModTrigger.type` of the trigger may be incorrect.
+            Some attributes such as :attr:`~AutoModTrigger.keyword_filter`, :attr:`~AutoModTrigger.regex_patterns`,
+            and :attr:`~AutoModTrigger.allow_list` will only have the added or removed values.
+
         :type: :class:`AutoModTrigger`
 
     .. attribute:: actions
@@ -6647,7 +6846,7 @@ AuditLogDiff
 
         See also :attr:`ForumChannel.default_reaction_emoji`
 
-        :type: :class:`default_reaction_emoji`
+        :type: Optional[:class:`PartialEmoji`]
 
 .. this is currently missing the following keys: reason
    I'm not sure how to port these
@@ -6871,6 +7070,9 @@ Affinity
 .. autoclass:: GuildAffinity()
     :members:
 
+.. autoclass:: ChannelAffinity()
+    :members:
+
 Billing
 ~~~~~~~
 
@@ -6987,6 +7189,7 @@ Application
 
 .. autoclass:: PartialApplication()
     :members:
+    :inherited-members:
 
 .. attributetable:: ApplicationProfile
 
@@ -7032,6 +7235,11 @@ Application
 .. attributetable:: EmbeddedActivityPlatformConfig
 
 .. autoclass:: EmbeddedActivityPlatformConfig()
+    :members:
+
+.. attributetable:: DetectableApplication
+
+.. autoclass:: DetectableApplication()
     :members:
 
 .. attributetable:: UnverifiedApplication
@@ -7158,9 +7366,19 @@ Promotion
 .. autoclass:: PricingPromotion()
     :members:
 
+.. attributetable:: UserOffer
+
+.. autoclass:: UserOffer()
+    :members:
+
 .. attributetable:: TrialOffer
 
 .. autoclass:: TrialOffer()
+    :members:
+
+.. attributetable:: DiscountOffer
+
+.. autoclass:: DiscountOffer()
     :members:
 
 Subscription
@@ -7341,6 +7559,26 @@ Guild
         The :class:`User` that was banned.
 
         :type: :class:`User`
+
+.. class:: BulkBanResult
+
+    A namedtuple which represents the result returned from :meth:`~Guild.bulk_ban`.
+
+    .. versionadded:: 2.1
+
+    .. attribute:: banned
+
+        The list of users that were banned. The inner :class:`Object` of the list
+        has the :attr:`Object.type` set to :class:`User`.
+
+        :type: List[:class:`Object`]
+    .. attribute:: failed
+
+        The list of users that could not be banned. The inner :class:`Object` of the list
+        has the :attr:`Object.type` set to :class:`User`.
+
+        :type: List[:class:`Object`]
+
 
 Role
 ~~~~~
@@ -7682,9 +7920,24 @@ Message
 .. autoclass:: DeletedReferencedMessage()
     :members:
 
+.. attributetable:: MessageSnapshot
+
+.. autoclass:: MessageSnapshot()
+    :members:
+
 .. attributetable:: RoleSubscriptionInfo
 
 .. autoclass:: RoleSubscriptionInfo()
+    :members:
+
+.. attributetable:: PurchaseNotification
+
+.. autoclass:: PurchaseNotification()
+    :members:
+
+.. attributetable:: GuildProductPurchase
+
+.. autoclass:: GuildProductPurchase()
     :members:
 
 Reaction
@@ -7874,6 +8127,11 @@ RawEvent
 .. attributetable:: RawMessageUpdateEvent
 
 .. autoclass:: RawMessageUpdateEvent()
+    :members:
+
+.. attributetable:: RawPollVoteActionEvent
+
+.. autoclass:: RawPollVoteActionEvent()
     :members:
 
 .. attributetable:: RawReactionActionEvent
@@ -8167,6 +8425,11 @@ Flags
 .. autoclass:: OnboardingProgressFlags()
     :members:
 
+.. attributetable:: OverlayMethodFlags
+
+.. autoclass:: OverlayMethodFlags()
+    :members:
+
 .. attributetable:: PaymentFlags
 
 .. autoclass:: PaymentFlags()
@@ -8208,6 +8471,11 @@ Flags
 .. autoclass:: ReadStateFlags()
     :members:
 
+.. attributetable:: RoleFlags
+
+.. autoclass:: RoleFlags()
+    :members:
+
 .. attributetable:: SKUFlags
 
 .. autoclass:: SKUFlags()
@@ -8216,6 +8484,25 @@ Flags
 .. attributetable:: SystemChannelFlags
 
 .. autoclass:: SystemChannelFlags()
+    :members:
+
+Poll
+~~~~
+
+.. attributetable:: Poll
+
+.. autoclass:: Poll()
+    :members:
+
+.. attributetable:: PollAnswer
+
+.. autoclass:: PollAnswer()
+    :members:
+    :inherited-members:
+
+.. attributetable:: PollMedia
+
+.. autoclass:: PollMedia()
     :members:
 
 
