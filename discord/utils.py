@@ -1758,20 +1758,20 @@ class Headers:
         cls: type[Self], session: ClientSession, proxy: Optional[str] = None, proxy_auth: Optional[BasicAuth] = None
     ) -> Self:
         """Creates a new :class:`Headers` instance using the default fetching mechanisms."""
-        try:
-            properties, extra, encoded = await asyncio.wait_for(
-                cls.get_api_properties(session, 'web', proxy=proxy, proxy_auth=proxy_auth), timeout=3
-            )
-        except Exception:
-            _log.info('Info API temporarily down. Falling back to manual retrieval...')
-        else:
-            return cls(
-                platform='Windows',
-                major_version=int(properties['browser_version'].split('.')[0]),
-                super_properties=properties,
-                encoded_super_properties=encoded,
-                extra_gateway_properties=extra,
-            )
+        # try:
+        #     properties, extra, encoded = await asyncio.wait_for(
+        #         cls.get_api_properties(session, 'web', proxy=proxy, proxy_auth=proxy_auth), timeout=3
+        #     )
+        # except Exception:
+        #     _log.info('Info API temporarily down. Falling back to manual retrieval...')
+        # else:
+        #     return cls(
+        #         platform='Windows',
+        #         major_version=int(properties['browser_version'].split('.')[0]),
+        #         super_properties=properties,
+        #         encoded_super_properties=encoded,
+        #         extra_gateway_properties=extra,
+        #     )
 
         try:
             bn = await cls._get_build_number(session, proxy=proxy, proxy_auth=proxy_auth)
@@ -1787,12 +1787,14 @@ class Headers:
 
         properties = {
             'os': 'Windows',
-            'browser': 'Chrome',
+            #'browser': 'Chrome',
+            'browser': 'Discord Client',
             'device': '',
             'system_locale': 'en-US',
             'browser_user_agent': cls._get_user_agent(bv),
             'browser_version': f'{bv}.0.0.0',
             'os_version': '10',
+            'os_arch': 'x64',
             'referrer': '',
             'referring_domain': '',
             'referrer_current': '',
