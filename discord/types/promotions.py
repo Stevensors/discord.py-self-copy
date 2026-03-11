@@ -36,14 +36,16 @@ class Promotion(TypedDict):
     trial_id: NotRequired[Snowflake]
     start_date: str
     end_date: str
+    promotion_type: int
     flags: int
-    outbound_title: str
+    outbound_title: NotRequired[str]
     outbound_redemption_modal_body: str
     outbound_redemption_page_link: NotRequired[str]
     outbound_redemption_url_format: NotRequired[str]
+    outbound_redemption_end_date: NotRequired[str]
     outbound_restricted_countries: NotRequired[List[str]]
     outbound_terms_and_conditions: str
-    inbound_title: NotRequired[str]
+    inbound_header_text: NotRequired[str]
     inbound_body_text: NotRequired[str]
     inbound_help_center_link: NotRequired[str]
     inbound_restricted_countries: NotRequired[List[str]]
@@ -57,8 +59,8 @@ class ClaimedPromotion(TypedDict):
 
 class UserOffer(TypedDict):
     user_trial_offer: Optional[TrialOffer]
-    user_discount_offer: Optional[DiscountOffer]
-    user_discount: Optional[DiscountOffer]
+    user_discount_offer: NotRequired[Optional[DiscountOffer]]
+    user_discount: NotRequired[Optional[DiscountOffer]]
 
 
 class TrialOffer(TypedDict):
@@ -71,10 +73,31 @@ class TrialOffer(TypedDict):
 
 class DiscountOffer(TypedDict):
     id: Snowflake
+    user_id: Snowflake
+    discount_id: Snowflake
+    discount: Discount
     expires_at: Optional[str]
     applied_at: Optional[str]
-    discount_id: Snowflake
-    user_id: Snowflake
+
+    # Only for applied offers
+    invoice_id: NotRequired[Optional[Snowflake]]
+    created_at: NotRequired[Optional[str]]
+    deleted_at: NotRequired[Optional[str]]
+
+
+class Discount(TypedDict):
+    id: Snowflake
+    amount: int
+    starts_at: Optional[str]
+    ends_at: Optional[str]
+    status: int
+    plan_ids: List[Snowflake]
+    sku_group_ids: Optional[List[Snowflake]]
+    sku_ids: Optional[List[Snowflake]]
+    user_usage_limit: int
+    user_usage_limit_interval: int
+    user_usage_limit_interval_count: int
+    created_at: str
 
 
 class PromotionalPrice(TypedDict):
@@ -85,7 +108,7 @@ class PromotionalPrice(TypedDict):
 class PricingPromotion(TypedDict):
     plan_id: Snowflake
     country_code: str
-    payment_source_types: List[str]
+    payment_source_types: List[int]
     price: PromotionalPrice
 
 

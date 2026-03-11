@@ -27,14 +27,15 @@ from __future__ import annotations
 from typing import Generic, Dict, List, Literal, Optional, Tuple, TypedDict, TypeVar, Union
 from typing_extensions import NotRequired, Required
 
-from .activity import Activity, BasePresenceUpdate, PartialPresenceUpdate, StatusType
+from .activity import Activity, BasePresenceUpdate, UserPresenceUpdate, PartialPresenceUpdate, StatusType
 from .application import BaseAchievement
 from .audit_log import AuditLogEntry
 from .automod import AutoModerationAction, AutoModerationRuleTriggerType
 from .channel import ChannelType, DMChannel, GroupDMChannel, StageInstance
+from .directory import DirectoryEntry, PartialDirectoryEntry
 from .emoji import Emoji, PartialEmoji
 from .entitlements import Entitlement, GatewayGift
-from .experiment import GuildExperiment, UserExperiment
+from .experiment import ApexExperimentResponse, GuildExperiment, UserExperiment
 from .guild import Guild, SupplementalGuild, UnavailableGuild
 from .integration import BaseIntegration, IntegrationApplication
 from .interactions import Modal
@@ -61,16 +62,12 @@ from .user import (
     User,
     UserGuildSettings,
 )
-from .voice import GuildVoiceState, PrivateVoiceState, VoiceState
+from .voice import GuildVoiceState, PrivateVoiceState, VoiceServerUpdate, VoiceState
 
 T = TypeVar('T')
 
 
-class UserPresenceUpdateEvent(BasePresenceUpdate):
-    ...
-
-
-PresenceUpdateEvent = Union[PartialPresenceUpdate, UserPresenceUpdateEvent]
+PresenceUpdateEvent = Union[PartialPresenceUpdate, UserPresenceUpdate]
 
 
 class Gateway(TypedDict):
@@ -90,6 +87,7 @@ class ReadyEvent(ResumedEvent):
     _trace: List[str]
     api_code_version: int
     analytics_token: str
+    apex_experiments: Optional[ApexExperimentResponse]
     auth_session_id_hash: str
     auth_token: NotRequired[str]
     connected_accounts: List[Connection]
@@ -121,8 +119,8 @@ class ReadyEvent(ResumedEvent):
 
 class ClientInfo(TypedDict):
     version: int
-    os: str
-    client: str
+    os: Literal['windows', 'osx', 'linux', 'android', 'ios', 'playstation', 'unknown']
+    client: Literal['web', 'desktop', 'mobile', 'unknown']
 
 
 class Session(TypedDict):
@@ -131,10 +129,11 @@ class Session(TypedDict):
     client_info: ClientInfo
     status: StatusType
     activities: List[Activity]
+    hidden_activities: List[Activity]
 
 
 class MergedPresences(TypedDict):
-    friends: List[UserPresenceUpdateEvent]
+    friends: List[UserPresenceUpdate]
     guilds: List[List[PartialPresenceUpdate]]
 
 
@@ -442,12 +441,7 @@ GuildScheduledEventUserAdd = GuildScheduledEventUserRemove = _GuildScheduledEven
 
 VoiceStateUpdateEvent = Union[GuildVoiceState, PrivateVoiceState]
 
-
-class VoiceServerUpdateEvent(TypedDict):
-    token: str
-    guild_id: Snowflake
-    channel_id: Snowflake
-    endpoint: Optional[str]
+VoiceServerUpdateEvent = VoiceServerUpdate
 
 
 class TypingStartEvent(TypedDict):
@@ -580,7 +574,7 @@ class PassiveUpdateV2Event(TypedDict):
     guild_id: Snowflake
     removed_voice_states: List[Snowflake]
     updated_channels: List[PartialUpdateChannel]
-    members: List[MemberWithUser]
+    updated_members: List[MemberWithUser]
     updated_voice_states: List[VoiceState]
 
 
@@ -645,7 +639,7 @@ class GuildSubscribePayload(BaseGuildSubscribePayload):
     guild_id: Snowflake
 
 
-BulkGuildSubscribePayload = Dict[Snowflake, BaseGuildSubscribePayload]
+BulkGuildSubscribePayload = Dict[str, BaseGuildSubscribePayload]
 
 
 class _GuildMemberListGroup(TypedDict):
@@ -719,3 +713,11 @@ class PollVoteActionEvent(TypedDict):
     message_id: Snowflake
     guild_id: NotRequired[Snowflake]
     answer_id: int
+
+
+class DirectoryEntryEvent(DirectoryEntry):
+    guild_id: Snowflake
+
+
+class DirectoryEntryDeleteEvent(PartialDirectoryEntry):
+    guild_id: Snowflake

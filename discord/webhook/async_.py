@@ -149,8 +149,8 @@ class AsyncWebhookAdapter:
             headers['Content-Type'] = 'application/json'
             to_send = utils._to_json(payload)
 
-        if auth_token is not None:  # TODO: same as sync.py
-            headers['Authorization'] = f'{auth_token}'
+        if auth_token is not None:
+            headers['Authorization'] = auth_token
 
         if reason is not None:
             headers['X-Audit-Log-Reason'] = urlquote(reason)
@@ -169,7 +169,11 @@ class AsyncWebhookAdapter:
                 if multipart:
                     form_data = aiohttp.FormData(quote_fields=False)
                     for p in multipart:
-                        form_data.add_field(**p)
+                        # Convert 'data' to 'value' for aiohttp.FormData compatibility
+                        field_params = p.copy()
+                        if 'data' in field_params:
+                            field_params['value'] = field_params.pop('data')
+                        form_data.add_field(**field_params)
                     to_send = form_data
 
                 try:
@@ -450,6 +454,11 @@ class PartialWebhookChannel(Hashable):
     def __repr__(self) -> str:
         return f'<PartialWebhookChannel name={self.name!r} id={self.id}>'
 
+    @property
+    def mention(self) -> str:
+        """:class:`str`: The string that allows you to mention the channel that the webhook is following."""
+        return f'<#{self.id}>'
+
 
 class PartialWebhookGuild(Hashable):
     """Represents a partial guild for webhooks.
@@ -527,7 +536,7 @@ class _WebhookState:
 
     def get_reaction_emoji(self, data: PartialEmojiPayload) -> Union[PartialEmoji, Emoji, str]:
         if self._parent is not None:
-            return self._parent.get_reaction_emoji(data)
+            return self._parent.get_emoji_from_partial_payload(data)
 
         emoji_id = utils._get_as_snowflake(data, 'id')
 
@@ -1005,7 +1014,7 @@ class Webhook(BaseWebhook):
         if client is not MISSING:
             state = client._connection
             if session is MISSING:
-                session = client.http._HTTPClient__session  # type: ignore
+                session = client.http._HTTPClient__asession  # type: ignore
 
         if session is MISSING:
             raise TypeError('session or client must be given')
@@ -1044,7 +1053,7 @@ class Webhook(BaseWebhook):
 
             .. versionadded:: 2.0
         user_token: Optional[:class:`str`]
-            The bot authentication token for authenticated requests
+            The authentication token for authenticated requests
             involving the webhook.
 
             .. versionadded:: 2.0
@@ -1070,7 +1079,7 @@ class Webhook(BaseWebhook):
         if client is not MISSING:
             state = client._connection
             if session is MISSING:
-                session = client.http._HTTPClient__session  # type: ignore
+                session = client.http._HTTPClient__asession  # type: ignore
 
         if session is MISSING:
             raise TypeError('session or client must be given')
@@ -1081,7 +1090,7 @@ class Webhook(BaseWebhook):
 
     @classmethod
     def _as_follower(cls, data, *, channel, user) -> Self:
-        name = f"{channel.guild} #{channel}"
+        name = f'{channel.guild} #{channel}'
         feed: WebhookPayload = {
             'id': data['webhook_id'],
             'type': 2,
@@ -1093,7 +1102,7 @@ class Webhook(BaseWebhook):
 
         state = channel._state
         http = state.http
-        session = http._HTTPClient__session
+        session = http._HTTPClient__asession
         proxy_auth = http.proxy_auth
         proxy = http.proxy
         return cls(feed, session=session, state=state, proxy_auth=proxy_auth, proxy=proxy, token=state.http.token)
@@ -1101,7 +1110,7 @@ class Webhook(BaseWebhook):
     @classmethod
     def from_state(cls, data: WebhookPayload, state: ConnectionState) -> Self:
         http = state.http
-        session = http._HTTPClient__session  # type: ignore
+        session = http._HTTPClient__asession  # type: ignore
         proxy_auth = http.proxy_auth
         proxy = http.proxy
         return cls(data, session=session, state=state, proxy_auth=proxy_auth, proxy=proxy, token=state.http.token)
@@ -1375,8 +1384,7 @@ class Webhook(BaseWebhook):
         silent: bool = MISSING,
         applied_tags: List[ForumTag] = MISSING,
         poll: Poll = MISSING,
-    ) -> WebhookMessage:
-        ...
+    ) -> WebhookMessage: ...
 
     @overload
     async def send(
@@ -1398,8 +1406,7 @@ class Webhook(BaseWebhook):
         silent: bool = MISSING,
         applied_tags: List[ForumTag] = MISSING,
         poll: Poll = MISSING,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     async def send(
         self,

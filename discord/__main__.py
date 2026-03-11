@@ -24,16 +24,19 @@ DEALINGS IN THE SOFTWARE.
 
 from __future__ import annotations
 
-from typing import Optional, Tuple, Dict
-
 import argparse
+import importlib.metadata
+import platform
 import sys
-from pathlib import Path
+from pathlib import Path, PurePath, PureWindowsPath
+from typing import Dict, Optional, Tuple
+
+import aiohttp
+import curl_cffi
+import curl_cffi.requests.impersonate
+from discord_protos import __version__ as protos_version  # Avoid breaking selfcord
 
 import discord
-import importlib.metadata
-import aiohttp
-import platform
 
 
 def show_version() -> None:
@@ -47,6 +50,10 @@ def show_version() -> None:
         if version:
             entries.append(f'    - discord.py-self metadata: v{version}')
 
+    entries.append(f'    - discord-protos v{protos_version}')
+    entries.append(
+        f'- curl_cffi v{curl_cffi.__version__} (curl v{curl_cffi.__curl_version__} impersonating {curl_cffi.requests.impersonate.DEFAULT_CHROME})'  # type: ignore
+    )
     entries.append(f'- aiohttp v{aiohttp.__version__}')
     uname = platform.uname()
     entries.append('- system info: {0.system} {0.release} {0.version}'.format(uname))
@@ -131,7 +138,7 @@ async def setup(bot):
     await bot.add_cog({name}(bot))
 '''
 
-_cog_extras = '''
+_cog_extras = """
     async def cog_load(self):
         # loading logic goes here
         pass
@@ -164,7 +171,7 @@ _cog_extras = '''
         # called after a command is called here
         pass
 
-'''
+"""
 
 
 # certain file names and directory names are forbidden
@@ -219,8 +226,14 @@ def to_path(parser: argparse.ArgumentParser, name: str, *, replace_spaces: bool 
         )
         if len(name) <= 4 and name.upper() in forbidden:
             parser.error('invalid directory name given, use a different one')
+    path = PurePath(name)
+    if isinstance(path, PureWindowsPath) and path.drive:
+        drive, rest = path.parts[0], path.parts[1:]
+        transformed = tuple(map(lambda p: p.translate(_translation_table), rest))
+        name = drive + '\\'.join(transformed)
 
-    name = name.translate(_translation_table)
+    else:
+        name = name.translate(_translation_table)
     if replace_spaces:
         name = name.replace(' ', '-')
     return Path(name)
@@ -229,8 +242,6 @@ def to_path(parser: argparse.ArgumentParser, name: str, *, replace_spaces: bool 
 def newbot(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     new_directory = to_path(parser, args.directory) / to_path(parser, args.name)
 
-    # as a note exist_ok for Path is a 3.5+ only feature
-    # since we already checked above that we're >3.5
     try:
         new_directory.mkdir(exist_ok=True, parents=True)
     except OSError as exc:

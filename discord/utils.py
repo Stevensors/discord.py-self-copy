@@ -56,6 +56,8 @@ from typing import (
 )
 import collections
 import unicodedata
+import collections.abc
+from itertools import islice
 from base64 import b64encode, b64decode
 from bisect import bisect_left
 import datetime
@@ -74,11 +76,13 @@ from threading import Timer
 import types
 import typing
 import warnings
-import aiohttp
 import logging
-import zlib
-
+import struct
+import time
 import yarl
+import uuid
+
+from .enums import Locale, try_enum
 
 try:
     import orjson  # type: ignore
@@ -87,15 +91,20 @@ except ModuleNotFoundError:
 else:
     HAS_ORJSON = True
 
+_ZSTD_SOURCE: Literal['zstandard', 'compression.zstd'] | None = None
 
 try:
-    import zstandard  # type: ignore
-except ImportError:
-    HAS_ZSTD = False
-else:
-    HAS_ZSTD = True
+    from zstandard import ZstdDecompressor  # type: ignore
 
-from .enums import Locale, try_enum
+    _ZSTD_SOURCE = 'zstandard'
+except ImportError:
+    try:
+        from compression.zstd import ZstdDecompressor  # type: ignore
+
+        _ZSTD_SOURCE = 'compression.zstd'
+    except ImportError:
+        import zlib
+
 
 __all__ = (
     'oauth_url',
@@ -160,7 +169,7 @@ class _cached_property:
 
 
 if TYPE_CHECKING:
-    from aiohttp import ClientSession
+    from aiohttp import BasicAuth, ClientSession
     from functools import cached_property as cached_property
 
     from typing_extensions import ParamSpec, Self, TypeGuard
@@ -176,8 +185,7 @@ if TYPE_CHECKING:
     class _DecompressionContext(Protocol):
         COMPRESSION_TYPE: str
 
-        def decompress(self, data: bytes, /) -> str | None:
-            ...
+        def decompress(self, data: bytes, /) -> str | None: ...
 
     P = ParamSpec('P')
 
@@ -204,12 +212,10 @@ class CachedSlotProperty(Generic[T, T_co]):
         self.__doc__ = getattr(function, '__doc__')
 
     @overload
-    def __get__(self, instance: None, owner: Type[T]) -> CachedSlotProperty[T, T_co]:
-        ...
+    def __get__(self, instance: None, owner: Type[T]) -> CachedSlotProperty[T, T_co]: ...
 
     @overload
-    def __get__(self, instance: T, owner: Type[T]) -> T_co:
-        ...
+    def __get__(self, instance: T, owner: Type[T]) -> T_co: ...
 
     def __get__(self, instance: Optional[T], owner: Type[T]) -> Any:
         if instance is None:
@@ -258,15 +264,13 @@ class SequenceProxy(Sequence[T_co]):
         return self.__proxied
 
     def __repr__(self) -> str:
-        return f"SequenceProxy({self.__proxied!r})"
+        return f'SequenceProxy({self.__proxied!r})'
 
     @overload
-    def __getitem__(self, idx: SupportsIndex) -> T_co:
-        ...
+    def __getitem__(self, idx: SupportsIndex) -> T_co: ...
 
     @overload
-    def __getitem__(self, idx: slice) -> List[T_co]:
-        ...
+    def __getitem__(self, idx: slice) -> List[T_co]: ...
 
     def __getitem__(self, idx: Union[SupportsIndex, slice]) -> Union[T_co, List[T_co]]:
         return self.__copied[idx]
@@ -291,18 +295,15 @@ class SequenceProxy(Sequence[T_co]):
 
 
 @overload
-def parse_time(timestamp: None) -> None:
-    ...
+def parse_time(timestamp: None) -> None: ...
 
 
 @overload
-def parse_time(timestamp: str) -> datetime.datetime:
-    ...
+def parse_time(timestamp: str) -> datetime.datetime: ...
 
 
 @overload
-def parse_time(timestamp: Optional[str]) -> Optional[datetime.datetime]:
-    ...
+def parse_time(timestamp: Optional[str]) -> Optional[datetime.datetime]: ...
 
 
 def parse_time(timestamp: Optional[str]) -> Optional[datetime.datetime]:
@@ -312,18 +313,15 @@ def parse_time(timestamp: Optional[str]) -> Optional[datetime.datetime]:
 
 
 @overload
-def parse_date(date: None) -> None:
-    ...
+def parse_date(date: None) -> None: ...
 
 
 @overload
-def parse_date(date: str) -> datetime.date:
-    ...
+def parse_date(date: str) -> datetime.date: ...
 
 
 @overload
-def parse_date(date: Optional[str]) -> Optional[datetime.date]:
-    ...
+def parse_date(date: Optional[str]) -> Optional[datetime.date]: ...
 
 
 def parse_date(date: Optional[str]) -> Optional[datetime.date]:
@@ -333,18 +331,15 @@ def parse_date(date: Optional[str]) -> Optional[datetime.date]:
 
 
 @overload
-def parse_timestamp(timestamp: None, *, ms: bool = True) -> None:
-    ...
+def parse_timestamp(timestamp: None, *, ms: bool = True) -> None: ...
 
 
 @overload
-def parse_timestamp(timestamp: float, *, ms: bool = True) -> datetime.datetime:
-    ...
+def parse_timestamp(timestamp: float, *, ms: bool = True) -> datetime.datetime: ...
 
 
 @overload
-def parse_timestamp(timestamp: Optional[float], *, ms: bool = True) -> Optional[datetime.datetime]:
-    ...
+def parse_timestamp(timestamp: Optional[float], *, ms: bool = True) -> Optional[datetime.datetime]: ...
 
 
 def parse_timestamp(timestamp: Optional[float], *, ms: bool = True) -> Optional[datetime.datetime]:
@@ -369,7 +364,7 @@ def deprecated(instead: Optional[str] = None) -> Callable[[Callable[P, T]], Call
         def decorated(*args: P.args, **kwargs: P.kwargs) -> T:
             warnings.simplefilter('always', DeprecationWarning)  # turn off filter
             if instead:
-                fmt = "{0.__name__} is deprecated, use {1} instead."
+                fmt = '{0.__name__} is deprecated, use {1} instead.'
             else:
                 fmt = '{0.__name__} is deprecated.'
 
@@ -550,7 +545,7 @@ def time_snowflake(dt: datetime.datetime, /, *, high: bool = False) -> int:
 
 
 def _find(predicate: Callable[[T], Any], iterable: Iterable[T], /) -> Optional[T]:
-    return next((element for element in iterable if predicate(element)), None)
+    return next(filter(predicate, iterable), None)
 
 
 async def _afind(predicate: Callable[[T], Any], iterable: AsyncIterable[T], /) -> Optional[T]:
@@ -562,13 +557,11 @@ async def _afind(predicate: Callable[[T], Any], iterable: AsyncIterable[T], /) -
 
 
 @overload
-def find(predicate: Callable[[T], Any], iterable: AsyncIterable[T], /) -> Coro[Optional[T]]:
-    ...
+def find(predicate: Callable[[T], Any], iterable: AsyncIterable[T], /) -> Coro[Optional[T]]: ...
 
 
 @overload
-def find(predicate: Callable[[T], Any], iterable: Iterable[T], /) -> Optional[T]:
-    ...
+def find(predicate: Callable[[T], Any], iterable: Iterable[T], /) -> Optional[T]: ...
 
 
 def find(predicate: Callable[[T], Any], iterable: _Iter[T], /) -> Union[Optional[T], Coro[Optional[T]]]:
@@ -648,13 +641,11 @@ async def _aget(iterable: AsyncIterable[T], /, **attrs: Any) -> Optional[T]:
 
 
 @overload
-def get(iterable: AsyncIterable[T], /, **attrs: Any) -> Coro[Optional[T]]:
-    ...
+def get(iterable: AsyncIterable[T], /, **attrs: Any) -> Coro[Optional[T]]: ...
 
 
 @overload
-def get(iterable: Iterable[T], /, **attrs: Any) -> Optional[T]:
-    ...
+def get(iterable: Iterable[T], /, **attrs: Any) -> Optional[T]: ...
 
 
 def get(iterable: _Iter[T], /, **attrs: Any) -> Union[Optional[T], Coro[Optional[T]]]:
@@ -743,7 +734,7 @@ def _ocast(value: Any, type: Any):
 
 
 def _get_mime_type_for_image(data: bytes, with_video: bool = False, fallback: bool = False) -> str:
-    if data.startswith(b'\x89\x50\x4E\x47\x0D\x0A\x1A\x0A'):
+    if data.startswith(b'\x89\x50\x4e\x47\x0d\x0a\x1a\x0a'):
         return 'image/png'
     elif data[0:3] == b'\xff\xd8\xff' or data[6:10] in (b'JFIF', b'Exif'):
         return 'image/jpeg'
@@ -751,7 +742,7 @@ def _get_mime_type_for_image(data: bytes, with_video: bool = False, fallback: bo
         return 'image/gif'
     elif data.startswith(b'RIFF') and data[8:12] == b'WEBP':
         return 'image/webp'
-    elif data.startswith(b'\x66\x74\x79\x70\x69\x73\x6F\x6D') and with_video:
+    elif data.startswith(b'\x66\x74\x79\x70\x69\x73\x6f\x6d') and with_video:
         return 'video/mp4'
     else:
         if fallback:
@@ -849,13 +840,13 @@ async def maybe_coroutine(f: MaybeAwaitableFunc[P, T], *args: P.args, **kwargs: 
     if _isawaitable(value):
         return await value
     else:
-        return value  # type: ignore
+        return value
 
 
 async def async_all(
     gen: Iterable[Union[T, Awaitable[T]]],
     *,
-    check: Callable[[Union[T, Awaitable[T]]], TypeGuard[Awaitable[T]]] = _isawaitable,
+    check: Callable[[Union[T, Awaitable[T]]], TypeGuard[Awaitable[T]]] = _isawaitable,  # type: ignore
 ) -> bool:
     for elem in gen:
         if check(elem):
@@ -878,7 +869,7 @@ async def sane_wait_for(futures: Iterable[Awaitable[T]], *, timeout: Optional[fl
 def get_slots(cls: Type[Any]) -> Iterator[str]:
     for mro in reversed(cls.__mro__):
         try:
-            yield from mro.__slots__  # type: ignore
+            yield from mro.__slots__
         except AttributeError:
             continue
 
@@ -891,13 +882,11 @@ def compute_timedelta(dt: datetime.datetime) -> float:
 
 
 @overload
-async def sleep_until(when: datetime.datetime, result: T) -> T:
-    ...
+async def sleep_until(when: datetime.datetime, result: T) -> T: ...
 
 
 @overload
-async def sleep_until(when: datetime.datetime) -> None:
-    ...
+async def sleep_until(when: datetime.datetime) -> None: ...
 
 
 async def sleep_until(when: datetime.datetime, result: Optional[T] = None) -> Optional[T]:
@@ -959,8 +948,7 @@ class SnowflakeList(_SnowflakeListBase):
 
     if TYPE_CHECKING:
 
-        def __init__(self, data: Optional[Iterable[int]] = None, *, is_sorted: bool = False):
-            ...
+        def __init__(self, data: Optional[Iterable[int]] = None, *, is_sorted: bool = False): ...
 
     def __new__(cls, data: Optional[Iterable[int]] = None, *, is_sorted: bool = False) -> Self:
         if data:
@@ -981,6 +969,11 @@ class SnowflakeList(_SnowflakeListBase):
     def has(self, element: int) -> bool:
         i = bisect_left(self, element)
         return i != len(self) and self[i] == element
+
+    def discard(self, element: int) -> None:
+        i = bisect_left(self, element)
+        if i != len(self) and self[i] == element:
+            del self[i]
 
 
 _IS_ASCII = re.compile(r'^[\x00-\x7f]+$')
@@ -1107,11 +1100,11 @@ _MARKDOWN_ESCAPE_SUBREGEX = '|'.join(r'\{0}(?=([\s\S]*((?<!\{0})\{0})))'.format(
 
 _MARKDOWN_ESCAPE_COMMON = r'^>(?:>>)?\s|\[.+\]\(.+\)|^#{1,3}|^\s*-'
 
-_MARKDOWN_ESCAPE_REGEX = re.compile(fr'(?P<markdown>{_MARKDOWN_ESCAPE_SUBREGEX}|{_MARKDOWN_ESCAPE_COMMON})', re.MULTILINE)
+_MARKDOWN_ESCAPE_REGEX = re.compile(rf'(?P<markdown>{_MARKDOWN_ESCAPE_SUBREGEX}|{_MARKDOWN_ESCAPE_COMMON})', re.MULTILINE)
 
 _URL_REGEX = r'(?P<url><[^: >]+:\/[^ >]+>|(?:https?|steam):\/\/[^\s<]+[^<.,:;\"\'\]\s])'
 
-_MARKDOWN_STOCK_REGEX = fr'(?P<markdown>[_\\~|\*`]|{_MARKDOWN_ESCAPE_COMMON})'
+_MARKDOWN_STOCK_REGEX = rf'(?P<markdown>[_\\~|\*`]|{_MARKDOWN_ESCAPE_COMMON})'
 
 
 def remove_markdown(text: str, *, ignore_links: bool = True) -> str:
@@ -1218,17 +1211,18 @@ def escape_mentions(text: str) -> str:
 
 
 def _chunk(iterator: Iterable[T], max_size: int) -> Iterator[List[T]]:
-    ret = []
-    n = 0
-    for item in iterator:
-        ret.append(item)
-        n += 1
-        if n == max_size:
-            yield ret
-            ret = []
-            n = 0
-    if ret:
-        yield ret
+    # Specialise iterators that can be sliced as it is much faster
+    if isinstance(iterator, collections.abc.Sequence):
+        for i in range(0, len(iterator), max_size):
+            yield list(iterator[i : i + max_size])
+    else:
+        # Fallback to slower path
+        iterator = iter(iterator)
+        while True:
+            batch = list(islice(iterator, max_size))
+            if not batch:
+                break
+            yield batch
 
 
 async def _achunk(iterator: AsyncIterable[T], max_size: int) -> AsyncIterator[List[T]]:
@@ -1246,13 +1240,11 @@ async def _achunk(iterator: AsyncIterable[T], max_size: int) -> AsyncIterator[Li
 
 
 @overload
-def as_chunks(iterator: AsyncIterable[T], max_size: int) -> AsyncIterator[List[T]]:
-    ...
+def as_chunks(iterator: AsyncIterable[T], max_size: int) -> AsyncIterator[List[T]]: ...
 
 
 @overload
-def as_chunks(iterator: Iterable[T], max_size: int) -> Iterator[List[T]]:
-    ...
+def as_chunks(iterator: Iterable[T], max_size: int) -> Iterator[List[T]]: ...
 
 
 def as_chunks(iterator: _Iter[T], max_size: int) -> _Iter[List[T]]:
@@ -1294,7 +1286,7 @@ def flatten_literal_params(parameters: Iterable[Any]) -> Tuple[Any, ...]:
     literal_cls = type(Literal[0])
     for p in parameters:
         if isinstance(p, literal_cls):
-            params.extend(p.__args__)
+            params.extend(p.__args__)  # type: ignore
         else:
             params.append(p)
     return tuple(params)
@@ -1345,8 +1337,8 @@ def evaluate_annotation(
         is_literal = False
         args = tp.__args__
         if not hasattr(tp, '__origin__'):
-            if PY_310 and tp.__class__ is types.UnionType:  # type: ignore
-                converted = Union[args]  # type: ignore
+            if PY_310 and tp.__class__ is types.UnionType:
+                converted = Union[args]
                 return evaluate_annotation(converted, globals, locals, cache)
 
             return tp
@@ -1407,7 +1399,7 @@ def is_inside_class(func: Callable[..., Any]) -> bool:
     return not remaining.endswith('<locals>')
 
 
-TimestampStyle = Literal['f', 'F', 'd', 'D', 't', 'T', 'R']
+TimestampStyle = Literal['f', 'F', 'd', 'D', 't', 'T', 's', 'S', 'R']
 
 
 def format_dt(dt: datetime.datetime, /, style: Optional[TimestampStyle] = None) -> str:
@@ -1415,23 +1407,27 @@ def format_dt(dt: datetime.datetime, /, style: Optional[TimestampStyle] = None) 
 
     This allows for a locale-independent way of presenting data using Discord specific Markdown.
 
-    +-------------+----------------------------+-----------------+
-    |    Style    |       Example Output       |   Description   |
-    +=============+============================+=================+
-    | t           | 22:57                      | Short Time      |
-    +-------------+----------------------------+-----------------+
-    | T           | 22:57:58                   | Long Time       |
-    +-------------+----------------------------+-----------------+
-    | d           | 17/05/2016                 | Short Date      |
-    +-------------+----------------------------+-----------------+
-    | D           | 17 May 2016                | Long Date       |
-    +-------------+----------------------------+-----------------+
-    | f (default) | 17 May 2016 22:57          | Short Date Time |
-    +-------------+----------------------------+-----------------+
-    | F           | Tuesday, 17 May 2016 22:57 | Long Date Time  |
-    +-------------+----------------------------+-----------------+
-    | R           | 5 years ago                | Relative Time   |
-    +-------------+----------------------------+-----------------+
+    +-------------+--------------------------------+-------------------------+
+    |    Style    |        Example Output          |       Description       |
+    +=============+================================+=========================+
+    | t           | 22:57                          | Short Time              |
+    +-------------+--------------------------------+-------------------------+
+    | T           | 22:57:58                       | Medium Time             |
+    +-------------+--------------------------------+-------------------------+
+    | d           | 17/05/2016                     | Short Date              |
+    +-------------+--------------------------------+-------------------------+
+    | D           | May 17, 2016                   | Long Date               |
+    +-------------+--------------------------------+-------------------------+
+    | f (default) | May 17, 2016 at 22:57          | Long Date, Short Time   |
+    +-------------+--------------------------------+-------------------------+
+    | F           | Tuesday, May 17, 2016 at 22:57 | Full Date, Short Time   |
+    +-------------+--------------------------------+-------------------------+
+    | s           | 17/05/2016, 22:57              | Short Date, Short Time  |
+    +-------------+--------------------------------+-------------------------+
+    | S           | 17/05/2016, 22:57:58           | Short Date, Medium Time |
+    +-------------+--------------------------------+-------------------------+
+    | R           | 5 years ago                    | Relative Time           |
+    +-------------+--------------------------------+-------------------------+
 
     Note that the exact output depends on the user's locale setting in the client. The example output
     presented is using the ``en-GB`` locale.
@@ -1540,99 +1536,6 @@ class ExpiringString(collections.UserString):
     def destroy(self) -> None:
         self._destruct()
         self._timer.cancel()
-
-
-FALLBACK_BUILD_NUMBER = 9999
-FALLBACK_BROWSER_VERSION = '125.0.0.0'
-_CLIENT_ASSET_REGEX = re.compile(r'assets/([a-z0-9.]+)\.js')
-_BUILD_NUMBER_REGEX = re.compile(r'build_number:"(\d+)"')
-
-
-async def _get_info(
-    session: ClientSession, proxy: Optional[str] = None, proxy_auth: Optional[aiohttp.BasicAuth] = None
-) -> Tuple[Dict[str, Any], str]:
-    # try:
-    #     async with session.post(
-    #         'https://cordapi.dolfi.es/api/v2/properties/web', timeout=5, proxy=proxy, proxy_auth=proxy_auth
-    #     ) as resp:
-    #         json = await resp.json()
-    #         return json['properties'], json['encoded']
-    # except Exception:
-    #     _log.info('Info API temporarily down. Falling back to manual retrieval...')
-
-    try:
-        bn = await _get_build_number(session, proxy, proxy_auth)
-    except Exception:
-        _log.critical('Could not retrieve client build number. Falling back to hardcoded value...')
-        bn = FALLBACK_BUILD_NUMBER
-
-    try:
-        bv = await _get_browser_version(session, proxy, proxy_auth)
-    except Exception:
-        _log.critical('Could not retrieve browser version. Falling back to hardcoded value...')
-        bv = FALLBACK_BROWSER_VERSION
-
-    properties = {
-        'os': 'Windows',
-        # 'browser': 'Chrome',
-        'browser': 'Discord Client',
-        'device': '',
-        'browser_user_agent': _get_user_agent(bv),
-        'browser_version': bv,
-        'os_version': '10',
-        'os_arch': 'x64',
-        'referrer': '',
-        'referring_domain': '',
-        'referrer_current': '',
-        'referring_domain_current': '',
-        'release_channel': 'stable',
-        'system_locale': 'en-US',
-        'client_build_number': bn,
-        'client_event_source': None,
-        'design_id': 0,
-    }
-    return properties, b64encode(_to_json(properties).encode()).decode('utf-8')
-
-
-async def _get_build_number(
-    session: ClientSession, proxy: Optional[str] = None, proxy_auth: Optional[aiohttp.BasicAuth] = None
-) -> int:
-    """Fetches client build number"""
-    async with session.get('https://discord.com/login', proxy=proxy, proxy_auth=proxy_auth) as resp:
-        app = await resp.text()
-        assets = _CLIENT_ASSET_REGEX.findall(app)
-        if not assets:
-            raise RuntimeError('Could not find client asset files')
-
-    for asset in assets[::-1]:
-        async with session.get(f'https://discord.com/assets/{asset}.js', proxy=proxy, proxy_auth=proxy_auth) as resp:
-            build = await resp.text()
-            match = _BUILD_NUMBER_REGEX.search(build)
-            if match is None:
-                continue
-            return int(match.group(1))
-
-    return RuntimeError('Could not find client build number')
-
-
-async def _get_browser_version(
-    session: ClientSession, proxy: Optional[str] = None, proxy_auth: Optional[aiohttp.BasicAuth] = None
-) -> str:
-    """Fetches the latest Windows 10/Chrome major browser version."""
-    async with session.get(
-        'https://versionhistory.googleapis.com/v1/chrome/platforms/win/channels/stable/versions',
-        proxy=proxy,
-        proxy_auth=proxy_auth,
-    ) as response:
-        data = await response.json()
-        major = data['versions'][0]['version'].split('.')[0]
-        return f'{major}.0.0.0'
-
-
-def _get_user_agent(version: str) -> str:
-    """Fetches the latest Windows 10/Chrome user-agent."""
-    # Because of [user agent reduction](https://www.chromium.org/updates/ua-reduction/), we just need the major version now :)
-    return f'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{version} Safari/537.36'
 
 
 def is_docker() -> bool:
@@ -1822,20 +1725,286 @@ else:
                 return -((unsigned_val ^ 0xFFFFFFFF) + 1)
 
 
-if HAS_ZSTD:
+_SENTRY_ASSET_REGEX = re.compile(r'assets/(sentry\.\w+)\.js')
+_BUILD_NUMBER_REGEX = re.compile(r'buildNumber\D+(\d+)"')
+
+
+class Headers:
+    """A class to provide standard headers for HTTP requests.
+
+    For now, this is NOT user-customizable and always emulates Chrome on Windows.
+    """
+
+    FALLBACK_BUILD_NUMBER = 9999
+    FALLBACK_BROWSER_VERSION = 136
+
+    def __init__(
+        self,
+        *,
+        platform: Literal['Windows', 'macOS', 'Linux', 'Android', 'iOS'],
+        major_version: int,
+        super_properties: Dict[str, Any],
+        encoded_super_properties: str,
+        extra_gateway_properties: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        self.platform = platform
+        self.major_version = major_version
+        self.super_properties = super_properties
+        self.encoded_super_properties = encoded_super_properties
+        self.extra_gateway_properties = extra_gateway_properties or {}
+
+    @classmethod
+    async def default(
+        cls: type[Self], session: ClientSession, proxy: Optional[str] = None, proxy_auth: Optional[BasicAuth] = None
+    ) -> Self:
+        """Creates a new :class:`Headers` instance using the default fetching mechanisms."""
+        try:
+            properties, extra, encoded = await asyncio.wait_for(
+                cls.get_api_properties(session, 'web', proxy=proxy, proxy_auth=proxy_auth), timeout=3
+            )
+        except Exception:
+            _log.info('Info API temporarily down. Falling back to manual retrieval...')
+        else:
+            return cls(
+                platform='Windows',
+                major_version=int(properties['browser_version'].split('.')[0]),
+                super_properties=properties,
+                encoded_super_properties=encoded,
+                extra_gateway_properties=extra,
+            )
+
+        try:
+            bn = await cls._get_build_number(session, proxy=proxy, proxy_auth=proxy_auth)
+        except Exception:
+            _log.critical('Could not retrieve client build number. Falling back to hardcoded value...')
+            bn = cls.FALLBACK_BUILD_NUMBER
+
+        try:
+            bv = await cls._get_browser_version(session, proxy=proxy, proxy_auth=proxy_auth)
+        except Exception:
+            _log.critical('Could not retrieve browser version. Falling back to hardcoded value...')
+            bv = cls.FALLBACK_BROWSER_VERSION
+
+        properties = {
+            'os': 'Windows',
+            'browser': 'Chrome',
+            'device': '',
+            'system_locale': 'en-US',
+            'browser_user_agent': cls._get_user_agent(bv),
+            'browser_version': f'{bv}.0.0.0',
+            'os_version': '10',
+            'referrer': '',
+            'referring_domain': '',
+            'referrer_current': '',
+            'referring_domain_current': '',
+            'release_channel': 'stable',
+            'client_build_number': bn,
+            'client_event_source': None,
+            'has_client_mods': False,
+            'client_launch_id': str(uuid.uuid4()),
+            'client_app_state': 'unfocused',
+            'client_heartbeat_session_id': str(uuid.uuid4()),
+        }
+
+        return cls(
+            platform='Windows',
+            major_version=bv,
+            super_properties=properties,
+            encoded_super_properties=b64encode(_to_json(properties).encode()).decode('utf-8'),
+            extra_gateway_properties={
+                'is_fast_connect': False,
+                'latest_headless_tasks': [],
+                'latest_headless_task_run_seconds_before': None,
+                'gateway_connect_reasons': 'AppSkeleton',
+            },
+        )
+
+    @cached_property
+    def user_agent(self) -> str:
+        """Returns the user agent to be used for HTTP requests."""
+        return self.super_properties['browser_user_agent']
+
+    @cached_property
+    def client_hints(self) -> Dict[str, str]:
+        """Returns the client hints to be used for HTTP requests."""
+        return {
+            'Sec-CH-UA': ', '.join([f'"{brand}";v="{version}"' for brand, version in self.generate_brand_version_list()]),
+            'Sec-CH-UA-Mobile': '?1' if self.platform in ('Android', 'iOS') else '?0',
+            'Sec-CH-UA-Platform': f'"{self.platform}"',
+        }
+
+    @property
+    def gateway_properties(self) -> Dict[str, Any]:
+        """Returns the properties to be used for the Gateway."""
+        return {
+            **self.super_properties,
+            **self.extra_gateway_properties,
+        }
+
+    @staticmethod
+    async def get_api_properties(
+        session: ClientSession, type: str, *, proxy: Optional[str] = None, proxy_auth: Optional[BasicAuth] = None
+    ) -> Tuple[Dict[str, Any], Dict[str, Any], str]:
+        """Fetches client properties from the API."""
+        async with session.post(
+            f'https://cordapi.dolfi.es/api/v2/properties/{type}', proxy=proxy, proxy_auth=proxy_auth
+        ) as resp:
+            resp.raise_for_status()
+            json = await resp.json()
+            return json['properties'], json['extra_gateway_properties'], json['encoded']
+
+    @staticmethod
+    async def _get_build_number(
+        session: ClientSession, *, proxy: Optional[str] = None, proxy_auth: Optional[BasicAuth] = None
+    ) -> int:
+        """Fetches client build number."""
+        async with session.get('https://discord.com/login', proxy=proxy, proxy_auth=proxy_auth) as resp:
+            app = await resp.text()
+            match = _SENTRY_ASSET_REGEX.search(app)
+            if match is None:
+                raise RuntimeError('Could not find sentry asset file')
+            sentry = match.group(1)
+
+        async with session.get(f'https://static.discord.com/assets/{sentry}.js', proxy=proxy, proxy_auth=proxy_auth) as resp:
+            build = await resp.text()
+            match = _BUILD_NUMBER_REGEX.search(build)
+            if match is None:
+                raise RuntimeError('Could not find build number')
+            return int(match.group(1))
+
+    @staticmethod
+    async def _get_browser_version(
+        session: ClientSession, proxy: Optional[str] = None, proxy_auth: Optional[BasicAuth] = None
+    ) -> int:
+        """Fetches the latest Windows 10/Chrome major browser version."""
+        async with session.get(
+            'https://versionhistory.googleapis.com/v1/chrome/platforms/win/channels/stable/versions',
+            proxy=proxy,
+            proxy_auth=proxy_auth,
+        ) as response:
+            data = await response.json()
+            return int(data['versions'][0]['version'].split('.')[0])
+
+    @staticmethod
+    def _get_user_agent(version: int, brand: Optional[str] = None) -> str:
+        """Fetches the latest Windows/Chrome user-agent."""
+        # Because of [user agent reduction](https://www.chromium.org/updates/ua-reduction/), we just need the major version now :)
+        ret = f'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{version}.0.0.0 Safari/537.36'
+        if brand:
+            # e.g. Edg/v.0.0.0 for Microsoft Edge
+            ret += f' {brand}/{version}.0.0.0'
+        return ret
+
+    # These are all adapted from Chromium source code (https://github.com/chromium/chromium/blob/master/components/embedder_support/user_agent_utils.cc)
+
+    def generate_brand_version_list(self, brand: Optional[str] = 'Google Chrome') -> List[Tuple[str, str]]:
+        """Generates a list of brand and version pairs for the user-agent."""
+        version = self.major_version
+        greasey_bv = self._get_greased_user_agent_brand_version(version)
+        chromium_bv = ('Chromium', version)
+        brand_version_list = [greasey_bv, chromium_bv]
+        if brand:
+            brand_version_list.append((brand, version))
+
+        order = self._get_random_order(version, len(brand_version_list))
+        shuffled_brand_version_list: List[Any] = [None] * len(brand_version_list)
+        for i, idx in enumerate(order):
+            shuffled_brand_version_list[idx] = brand_version_list[i]
+        return shuffled_brand_version_list
+
+    @staticmethod
+    def _get_random_order(seed: int, size: int) -> List[int]:
+        random.seed(seed)
+        if size == 2:
+            return [seed % size, (seed + 1) % size]
+        elif size == 3:
+            orders = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]]
+            return orders[seed % len(orders)]
+        else:
+            orders = [
+                [0, 1, 2, 3],
+                [0, 1, 3, 2],
+                [0, 2, 1, 3],
+                [0, 2, 3, 1],
+                [0, 3, 1, 2],
+                [0, 3, 2, 1],
+                [1, 0, 2, 3],
+                [1, 0, 3, 2],
+                [1, 2, 0, 3],
+                [1, 2, 3, 0],
+                [1, 3, 0, 2],
+                [1, 3, 2, 0],
+                [2, 0, 1, 3],
+                [2, 0, 3, 1],
+                [2, 1, 0, 3],
+                [2, 1, 3, 0],
+                [2, 3, 0, 1],
+                [2, 3, 1, 0],
+                [3, 0, 1, 2],
+                [3, 0, 2, 1],
+                [3, 1, 0, 2],
+                [3, 1, 2, 0],
+                [3, 2, 0, 1],
+                [3, 2, 1, 0],
+            ]
+            return orders[seed % len(orders)]
+
+    @staticmethod
+    def _get_greased_user_agent_brand_version(seed: int) -> Tuple[str, str]:
+        greasey_chars = [' ', '(', ':', '-', '.', '/', ')', ';', '=', '?', '_']
+        greased_versions = ['8', '99', '24']
+        greasey_brand = (
+            f'Not{greasey_chars[seed % len(greasey_chars)]}A{greasey_chars[(seed + 1) % len(greasey_chars)]}Brand'
+        )
+        greasey_version = greased_versions[seed % len(greased_versions)]
+
+        version_parts = greasey_version.split('.')
+        if len(version_parts) > 1:
+            greasey_major_version = version_parts[0]
+        else:
+            greasey_major_version = greasey_version
+        return (greasey_brand, greasey_major_version)
+
+
+class IDGenerator:
+    def __init__(self):
+        self.prefix = random.randint(0, 0xFFFFFFFF) & 0xFFFFFFFF
+        self.creation_time = int(time.time() * 1000)
+        self.sequence = 0
+
+    def generate(self, user_id: int = 0):
+        uuid = bytearray(24)
+        # Lowest signed 32 bits
+        struct.pack_into('<I', uuid, 0, user_id & 0xFFFFFFFF)
+        struct.pack_into('<I', uuid, 4, user_id >> 32)
+        struct.pack_into('<I', uuid, 8, self.prefix)
+        # Lowest signed 32 bits
+        struct.pack_into('<I', uuid, 12, self.creation_time & 0xFFFFFFFF)
+        struct.pack_into('<I', uuid, 16, self.creation_time >> 32)
+        struct.pack_into('<I', uuid, 20, self.sequence)
+        self.sequence += 1
+        return b64encode(uuid).decode('utf-8')
+
+
+if _ZSTD_SOURCE is not None:
 
     class _ZstdDecompressionContext:
-        __slots__ = ('context',)
+        __slots__ = ('decompressor',)
 
         COMPRESSION_TYPE: str = 'zstd-stream'
 
         def __init__(self) -> None:
-            decompressor = zstandard.ZstdDecompressor()
-            self.context = decompressor.decompressobj()
+            self.decompressor = ZstdDecompressor()
+            if _ZSTD_SOURCE == 'zstandard':
+                # The default API for zstandard requires a size hint when
+                # the size is not included in the zstandard frame.
+                # This constructs an instance of zstandard.ZstdDecompressionObj
+                # which dynamically allocates a buffer, matching stdlib module's behavior.
+                self.decompressor = self.decompressor.decompressobj()
 
         def decompress(self, data: bytes, /) -> str | None:
             # Each WS message is a complete gateway message
-            return self.context.decompress(data).decode('utf-8')
+            return self.decompressor.decompress(data).decode('utf-8')
 
     _ActiveDecompressionContext: Type[_DecompressionContext] = _ZstdDecompressionContext
 else:

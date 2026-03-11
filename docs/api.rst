@@ -382,6 +382,20 @@ Debug
                     message or :class:`str` to denote a regular text message.
     :type payload: Union[:class:`bytes`, :class:`str`]
 
+Directory Entries
+~~~~~~~~~~~~~~~~~~
+
+.. function:: on_directory_entry_create(directory_entry)
+              on_directory_entry_update(directory_entry)
+              on_directory_entry_delete(directory_entry)
+
+    Called when an entry is created, updated, or deleted in a directory channel.
+
+    .. versionadded:: 2.1
+
+    :param directory_entry: The directory entry that was created, updated, or deleted.
+    :type directory_entry: :class:`DirectoryEntry`
+
 Gateway
 ~~~~~~~~
 
@@ -541,17 +555,6 @@ Entitlements
     :param application: The library entry that was updated.
     :type application: :class:`LibraryApplication`
 
-.. function:: on_achievement_update(achievement, percent_complete)
-
-    Called when an achievement is updated.
-
-    .. versionadded:: 2.0
-
-    :param achievement: The achievement that was updated.
-    :type achievement: :class:`Achievement`
-    :param percent_complete: The percentage of the acheivement completed.
-    :type percent_complete: :class:`int`
-
 .. function:: on_entitlement_create(entitlement)
 
     Called when an entitlement is added to your account.
@@ -705,14 +708,33 @@ Relationships
 Notes
 ~~~~~~
 
-.. function:: on_note_update(note)
+.. function:: on_note_update(user, note)
 
     Called when a :class:`User`\'s note is updated.
 
     .. versionadded:: 2.0
 
+    .. versionchanged:: 2.1
+
+        Event signature was changed to include the ``user`` parameter.
+
+    :param user: The user whose note was updated.
+    :type user: :class:`User`
     :param note: The note that was updated.
-    :type note: :class:`Note`
+    :type note: :class:`str`
+
+.. function:: on_raw_note_update(user_id, note)
+
+    Called when a :class:`User`\'s note is updated.
+    Unlike :func:`on_note_update`, this is called regardless
+    of the user being in the internal user cache or not.
+
+    .. versionadded:: 2.1
+
+    :param user_id: The ID of the user whose note was updated.
+    :type user_id: :class:`int`
+    :param note: The note that was updated.
+    :type note: :class:`str`
 
 OAuth2
 ~~~~~~~
@@ -1042,6 +1064,7 @@ Members
     - avatar
     - username
     - discriminator
+    - primary guild
 
     :param before: The updated user's old info.
     :type before: :class:`User`
@@ -1807,6 +1830,15 @@ of :class:`enum.Enum`.
 
           Checks if two messages are not equal.
 
+    .. method:: is_deletable()
+
+        Checks if the message type is deletable, as some system messages cannot be deleted.
+
+        .. versionadded:: 2.1
+
+        :return: A boolean denoting if the message type is deletable.
+        :rtype: :class:`bool`
+
     .. attribute:: default
 
         The default message type. This is the same as regular messages.
@@ -2013,6 +2045,12 @@ of :class:`enum.Enum`.
 
         .. versionadded:: 2.1
 
+    .. attribute:: emoji_added
+
+        The system message sent when a custom emoji is added to the guild.
+
+        .. versionadded:: 2.1
+
 .. class:: InviteType
 
     Specifies the type of :class:`Invite`.
@@ -2157,6 +2195,86 @@ of :class:`enum.Enum`.
 
         .. versionadded:: 2.1
 
+.. class:: NameFont
+
+    Specifies the font of :class:`DisplayNameStyle`.
+
+    .. attribute:: default
+
+        The default font.
+
+    .. attribute:: bangers
+
+        "Bangers" font.
+
+    .. attribute:: bio_rhyme
+
+        "BioRhyme" font.
+
+    .. attribute:: cherry_bomb
+
+        "Cherry Bomb One" font.
+
+    .. attribute:: chicle
+
+        "Chicle" font.
+
+    .. attribute:: compagnon
+
+        "Compagnon" font.
+
+    .. attribute:: museo_moderno
+
+        "MuseoModerno" font.
+
+    .. attribute:: neo_castel
+
+        "Néo-Castel" font.
+
+    .. attribute:: pixelify
+
+        "Pixelify Sans" font.
+
+    .. attribute:: ribes
+
+        "Ribes" font.
+
+    .. attribute:: sinistre
+
+        "Sinistre" font.
+
+    .. attribute:: zilla_slab
+
+        "Zilla Slab" font.
+
+.. class:: NameEffect
+
+    Specifies the effect of :class:`DisplayNameStyle`.
+
+    .. attribute:: solid
+
+        Displays the first color provided.
+
+    .. attribute:: gradient
+
+        Two color gradient.
+
+    .. attribute:: neon
+
+        Glow around the name.
+
+    .. attribute:: toon
+
+        Subtle vertical gradient and stroke.
+
+    .. attribute:: pop
+
+        Colored dropshadow.
+
+    .. attribute:: glow
+
+        Alternate gradient style.
+
 .. class:: ActivityType
 
     Specifies the type of :class:`Activity`. This is used to check how to
@@ -2184,13 +2302,111 @@ of :class:`enum.Enum`.
 
     .. attribute:: custom
 
-        A custom activity type.
+        A custom status activity type.
 
     .. attribute:: competing
 
         A competing activity type.
 
         .. versionadded:: 1.5
+
+    .. attribute:: hang
+
+        A voice-only hang status activity type.
+
+.. class:: ActivityActionType
+
+    Specifies an action type for an :class:`Activity`.
+
+    .. versionadded:: 2.1
+
+    .. attribute:: join
+
+        Allows others to join a game with the user.
+
+    .. attribute:: spectate
+
+        Allows others to spectate a game the user is playing.
+
+    .. attribute:: listen
+
+        Allows others to listen to a song with the user.
+
+    .. attribute:: join_request
+
+        Asks others to invite the user to a game.
+
+.. class:: ActivityPlatform
+
+    Specifies the platform of an :class:`Activity`.
+
+    .. versionadded:: 2.1
+
+    .. attribute:: desktop
+
+        The activity is on desktop.
+
+    .. attribute:: xbox
+
+        The activity is on Xbox.
+
+    .. attribute:: samsung
+
+        The activity is on Samsung.
+
+    .. attribute:: ios
+
+        The activity is on iOS.
+
+    .. attribute:: android
+
+        The activity is on Android.
+
+    .. attribute:: embedded
+
+        The activity is on an embedded device.
+
+    .. attribute:: ps4
+
+        The activity is on PlayStation 4.
+
+    .. attribute:: ps5
+
+        The activity is on PlayStation 5.
+
+    .. attribute:: meta_quest
+
+        The activity is on Meta Quest.
+
+.. class:: HangStatusType
+
+    Specifies the type of a :class:`HangActivity`.
+
+    .. versionadded:: 2.1
+
+    .. attribute:: chilling
+
+        The user is chilling.
+
+    .. attribute:: gaming
+
+        The user is gaming.
+
+    .. attribute:: focusing
+
+        The user is studying.
+
+    .. attribute:: brb
+
+        The user will brb.
+
+    .. attribute:: watching
+
+        The user is watching stuff.
+
+    .. attribute:: custom
+
+        A custom hang status.
 
 .. class:: HypeSquadHouse
 
@@ -2623,7 +2839,7 @@ of :class:`enum.Enum`.
         When this is the action, the type of :attr:`~AuditLogEntry.extra` is
         set to an unspecified proxy object with two attributes:
 
-        - ``channel``: A :class:`TextChannel` or :class:`Object` with the channel ID where the members were moved.
+        - ``channel``: An :class:`abc.Connectable` or :class:`Object` with the channel ID where the members were moved.
         - ``count``: An integer specifying how many members were moved.
 
         .. versionadded:: 1.3
@@ -2659,6 +2875,8 @@ of :class:`enum.Enum`.
         Possible attributes for :class:`AuditLogDiff`:
 
         - :attr:`~AuditLogDiff.colour`
+        - :attr:`~AuditLogDiff.secondary_colour`
+        - :attr:`~AuditLogDiff.tertiary_colour`
         - :attr:`~AuditLogDiff.mentionable`
         - :attr:`~AuditLogDiff.hoist`
         - :attr:`~AuditLogDiff.icon`
@@ -2682,6 +2900,8 @@ of :class:`enum.Enum`.
         Possible attributes for :class:`AuditLogDiff`:
 
         - :attr:`~AuditLogDiff.colour`
+        - :attr:`~AuditLogDiff.secondary_colour`
+        - :attr:`~AuditLogDiff.tertiary_colour`
         - :attr:`~AuditLogDiff.mentionable`
         - :attr:`~AuditLogDiff.hoist`
         - :attr:`~AuditLogDiff.icon`
@@ -2699,6 +2919,8 @@ of :class:`enum.Enum`.
         Possible attributes for :class:`AuditLogDiff`:
 
         - :attr:`~AuditLogDiff.colour`
+        - :attr:`~AuditLogDiff.secondary_colour`
+        - :attr:`~AuditLogDiff.tertiary_colour`
         - :attr:`~AuditLogDiff.mentionable`
         - :attr:`~AuditLogDiff.hoist`
         - :attr:`~AuditLogDiff.name`
@@ -2720,6 +2942,7 @@ of :class:`enum.Enum`.
         - :attr:`~AuditLogDiff.channel`
         - :attr:`~AuditLogDiff.uses`
         - :attr:`~AuditLogDiff.max_uses`
+        - :attr:`~AuditLogDiff.flags`
 
     .. attribute:: invite_update
 
@@ -2744,6 +2967,7 @@ of :class:`enum.Enum`.
         - :attr:`~AuditLogDiff.channel`
         - :attr:`~AuditLogDiff.uses`
         - :attr:`~AuditLogDiff.max_uses`
+        - :attr:`~AuditLogDiff.flags`
 
     .. attribute:: webhook_create
 
@@ -3007,6 +3231,7 @@ of :class:`enum.Enum`.
         which was created.
 
         Possible attributes for :class:`AuditLogDiff`:
+
         - :attr:`~AuditLogDiff.name`
         - :attr:`~AuditLogDiff.channel`
         - :attr:`~AuditLogDiff.description`
@@ -3026,6 +3251,7 @@ of :class:`enum.Enum`.
         which was updated.
 
         Possible attributes for :class:`AuditLogDiff`:
+
         - :attr:`~AuditLogDiff.name`
         - :attr:`~AuditLogDiff.channel`
         - :attr:`~AuditLogDiff.description`
@@ -3045,6 +3271,7 @@ of :class:`enum.Enum`.
         which was deleted.
 
         Possible attributes for :class:`AuditLogDiff`:
+
         - :attr:`~AuditLogDiff.name`
         - :attr:`~AuditLogDiff.channel`
         - :attr:`~AuditLogDiff.description`
@@ -3226,6 +3453,24 @@ of :class:`enum.Enum`.
 
         .. versionadded:: 2.0
 
+    .. attribute:: automod_quarantine_user
+
+        An automod rule quarantined a member.
+
+        When this is the action, the type of :attr:`~AuditLogEntry.target` is
+        a :class:`Member` with the ID of the person who triggered the automod rule.
+
+        When this is the action, the type of :attr:`~AuditLogEntry.extra` is
+        set to an unspecified proxy object with 3 attributes:
+
+        - ``automod_rule_name``: The name of the automod rule that was triggered.
+        - ``automod_rule_trigger_type``: A :class:`AutoModRuleTriggerType` representation of the rule type that was triggered.
+        - ``channel``: The channel of the message sent by the member when they were flagged. `None` if the member was quarantined when they just joined the guild.
+
+        When this is the action, :attr:`AuditLogEntry.changes` is empty.
+
+        .. versionadded:: 2.1
+
     .. attribute:: creator_monetization_request_created
 
         A request to monetize the server was created.
@@ -3235,6 +3480,104 @@ of :class:`enum.Enum`.
     .. attribute:: creator_monetization_terms_accepted
 
         The terms and conditions for creator monetization were accepted.
+
+        .. versionadded:: 2.1
+
+    .. attribute:: onboarding_prompt_create
+
+        A guild onboarding prompt was created.
+
+        When this is the action, the type of :attr:`~AuditLogEntry.target` is
+        a :class:`Object` with the ID of the prompt that the options belong to.
+
+        Possible attributes for :class:`AuditLogDiff`:
+
+        - :attr:`~AuditLogDiff.type`
+        - :attr:`~AuditLogDiff.title`
+        - :attr:`~AuditLogDiff.options`
+        - :attr:`~AuditLogDiff.single_select`
+        - :attr:`~AuditLogDiff.required`
+        - :attr:`~AuditLogDiff.in_onboarding`
+
+        .. versionadded:: 2.1
+
+    .. attribute:: onboarding_prompt_update
+
+        A guild onboarding prompt was updated.
+
+        When this is the action, the type of :attr:`~AuditLogEntry.target` is
+        a :class:`Object` with the ID of the prompt that the options belong to.
+
+        Possible attributes for :class:`AuditLogDiff`:
+
+        - :attr:`~AuditLogDiff.type`
+        - :attr:`~AuditLogDiff.title`
+        - :attr:`~AuditLogDiff.options`
+        - :attr:`~AuditLogDiff.single_select`
+        - :attr:`~AuditLogDiff.required`
+        - :attr:`~AuditLogDiff.in_onboarding`
+
+        .. versionadded:: 2.1
+
+    .. attribute:: onboarding_prompt_delete
+
+        A guild onboarding prompt was deleted.
+
+        When this is the action, the type of :attr:`~AuditLogEntry.target` is
+        a :class:`Object` with the ID of the prompt that the options belong to.
+
+        Possible attributes for :class:`AuditLogDiff`:
+
+        - :attr:`~AuditLogDiff.type`
+        - :attr:`~AuditLogDiff.title`
+        - :attr:`~AuditLogDiff.options`
+        - :attr:`~AuditLogDiff.single_select`
+        - :attr:`~AuditLogDiff.required`
+        - :attr:`~AuditLogDiff.in_onboarding`
+
+        .. versionadded:: 2.1
+
+    .. attribute:: onboarding_create
+
+        The guild's onboarding configuration was created.
+
+        When this is the action, the type of :attr:`~AuditLogEntry.target` is
+        always ``None``. Use :attr:`~AuditLogEntry.guild` to access the guild.
+
+        Possible attributes for :class:`AuditLogDiff`:
+
+        - :attr:`~AuditLogDiff.enabled`
+        - :attr:`~AuditLogDiff.default_channels`
+        - :attr:`~AuditLogDiff.prompts`
+        - :attr:`~AuditLogDiff.mode`
+
+        .. versionadded:: 2.1
+
+    .. attribute:: onboarding_update
+
+        The guild's onboarding configuration was updated.
+
+        When this is the action, the type of :attr:`~AuditLogEntry.target` is
+        always ``None``. Use :attr:`~AuditLogEntry.guild` to access the guild.
+
+        Possible attributes for :class:`AuditLogDiff`:
+
+        - :attr:`~AuditLogDiff.enabled`
+        - :attr:`~AuditLogDiff.default_channels`
+        - :attr:`~AuditLogDiff.prompts`
+        - :attr:`~AuditLogDiff.mode`
+
+        .. versionadded:: 2.1
+
+    .. attribute:: home_settings_create
+
+        The guild's server guide was created.
+
+        .. versionadded:: 2.1
+
+    .. attribute:: home_settings_update
+
+        The guild's server guide was updated.
 
         .. versionadded:: 2.1
 
@@ -4257,6 +4600,12 @@ of :class:`enum.Enum`.
 
         The discount is from a premium trial.
 
+    .. attribute:: default
+
+        The discount is a default discount.
+
+        .. versionadded:: 2.1
+
 .. class:: SubscriptionInterval
 
     Represents the interval of a subscription.
@@ -4293,13 +4642,51 @@ of :class:`enum.Enum`.
 
         The plan is purchased with sale pricing.
 
-    .. attribute:: nitro_classic
+    .. attribute:: premium_tier_1
 
         The plan is purchased with Nitro Classic discounted pricing.
 
-    .. attribute:: nitro
+    .. attribute:: nitro_classic
+
+        Alias of :attr:`SubscriptionPlanPurchaseType.premium_tier_1`.
+
+    .. attribute:: premium_tier_2
 
         The plan is purchased with Nitro discounted pricing.
+
+    .. attribute:: nitro
+
+        Alias of :attr:`SubscriptionPlanPurchaseType.premium_tier_2`.
+
+    .. attribute:: mobile
+
+        The plan is purchased with mobile pricing.
+
+        .. versionadded:: 2.1
+
+    .. attribute:: premium_tier_3
+
+        The plan is purchased with Nitro Basic discounted pricing.
+
+        .. versionadded:: 2.1
+
+    .. attribute:: nitro_basic
+
+        Alias of :attr:`SubscriptionPlanPurchaseType.premium_tier_3`.
+
+        .. versionadded:: 2.1
+
+    .. attribute:: mobile_premium_tier_2
+
+        The plan is purchased with mobile Nitro pricing.
+
+        .. versionadded:: 2.1
+
+    .. attribute:: mobile_nitro
+
+        Alias of :attr:`SubscriptionPlanPurchaseType.mobile_premium_tier_2`.
+
+        .. versionadded:: 2.1
 
 .. class:: PaymentStatus
 
@@ -4612,6 +4999,12 @@ of :class:`enum.Enum`.
 
         The SKU is an adventure game.
 
+    .. attribute:: arcade
+
+        The SKU is an arcade game.
+
+        .. versionadded:: 2.1
+
     .. attribute:: artillery
 
         The SKU is an artillery game.
@@ -4704,6 +5097,12 @@ of :class:`enum.Enum`.
 
         The SKU is a hockey game.
 
+    .. attribute:: indie
+
+        The SKU is an indie game.
+
+        .. versionadded:: 2.1
+
     .. attribute:: life_simulator
 
         The SKU is a life simulator.
@@ -4714,13 +5113,29 @@ of :class:`enum.Enum`.
 
     .. attribute:: massively_multiplayer
 
-        The SKU is a massively multiplayer game.
+        The SKU is a massively multiplayer online game.
 
-    .. attribute:: music
+    .. attribute:: metroidvania
 
-        The SKU is a music game.
+        The SKU is a Metroidvania game.
 
-    .. attribute:: party
+    .. attribute:: mmorpg
+
+        The SKU is a MMORPG.
+
+    .. attribute:: moba
+
+        The SKU is a MOBA.
+
+    .. attribute:: music_rhythm
+
+        The SKU is a rhythm game.
+
+    .. attribute:: open_world
+
+        The SKU is an open-world game.
+
+    .. attribute:: party_mini_game
 
         The SKU is a party game.
 
@@ -4735,6 +5150,12 @@ of :class:`enum.Enum`.
     .. attribute:: point_and_click
 
         The SKU is a point-and-click game.
+
+        .. versionadded:: 2.1
+
+    .. attribute:: psychological_horror
+
+        The SKU is a psychological horror game.
 
     .. attribute:: puzzle
 
@@ -4800,13 +5221,31 @@ of :class:`enum.Enum`.
 
         The SKU is a survival game.
 
-    .. attribute:: tennis
+    .. attribute:: survival_horror
 
-        The SKU is a tennis game.
+        The SKU is a survival horror game.
 
-    .. attribute:: third_person_shooter
+    .. attribute:: tactical
 
-        The SKU is a third-person shooter.
+        The SKU is a tactical game.
+
+        .. versionadded:: 2.1
+
+    .. attribute:: tower_defense
+
+        The SKU is a tower defense game.
+
+    .. attribute:: track_field
+
+        The SKU is a track and field game.
+
+    .. attribute:: train_simulator
+
+        The SKU is a train simulator game.
+
+    .. attribute:: trivia_board_game
+
+        The SKU is a trivia/board game.
 
     .. attribute:: turn_based_strategy
 
@@ -5170,6 +5609,24 @@ of :class:`enum.Enum`.
 
         Represents Linux.
 
+    .. attribute:: android
+
+        Represents Android.
+
+    .. attribute:: ios
+
+        Represents iOS.
+
+    .. attribute:: playstation
+
+        Represents PlayStation.
+
+        .. versionadded:: 2.1
+
+    .. attribute:: unknown
+
+        Represents an unknown operating system.
+
 .. class:: StickerAnimationOptions
 
     Represents the options found in ``Settings > Accessibility > Stickers`` in the Discord client.
@@ -5448,6 +5905,16 @@ of :class:`enum.Enum`.
 
         The ``vi`` locale.
 
+    .. attribute:: language_code
+
+        :class:`str`: Returns the locale's BCP 47 language code in the format of ``language-COUNTRY``.
+
+        This is derived from a predefined mapping based on Discord's supported locales.
+        If no mapping exists for the current locale, this returns the raw locale value as a fallback.
+
+        .. versionadded:: 2.1
+
+
 .. class:: MFALevel
 
     Represents the Multi-Factor Authentication requirement level of a guild.
@@ -5580,9 +6047,27 @@ of :class:`enum.Enum`.
 
     .. versionadded:: 2.0
 
+    .. attribute:: amazon_music
+
+        The user has an Amazon Music connection.
+
+        .. versionadded:: 2.1
+
     .. attribute:: battle_net
 
         The user has a Battle.net connection.
+
+    .. attribute:: bluesky
+
+        The user has a Bluesky connection.
+
+        .. versionadded:: 2.1
+
+    .. attribute:: bungie
+
+        The user has a Bungie connection.
+
+       .. versionadded:: 2.1
 
     .. attribute:: contacts
 
@@ -5591,6 +6076,12 @@ of :class:`enum.Enum`.
     .. attribute:: crunchyroll
 
         The user has a Crunchyroll connection.
+
+    .. attribute:: domain
+
+        The user has a domain connection.
+
+        .. versionadded:: 2.1
 
     .. attribute:: ebay
 
@@ -5618,6 +6109,12 @@ of :class:`enum.Enum`.
 
         The user has a League of Legends connection.
 
+    .. attribute:: mastodon
+
+        The user has a Mastodon connection.
+
+        .. versionadded:: 2.1
+
     .. attribute:: paypal
 
         The user has a PayPal connection.
@@ -5626,17 +6123,31 @@ of :class:`enum.Enum`.
 
         The user has a PlayStation connection.
 
+    .. attribute:: playstation_stg
+
+        The user has a PlayStation staging connection.
+
+        .. versionadded:: 2.1
+
     .. attribute:: reddit
 
         The user has a Reddit connection.
+
+    .. attribute:: roblox
+
+        The user has a Roblox connection.
+
+        .. versionadded:: 2.1
 
     .. attribute:: riot_games
 
         The user has a Riot Games connection.
 
-    .. attribute:: samsung
+    .. attribute:: soundcloud
 
-        The user has a Samsung Account connection.
+        The user has a SoundCloud connection.
+
+        .. versionadded:: 2.1
 
     .. attribute:: spotify
 
@@ -6114,24 +6625,222 @@ of :class:`enum.Enum`.
 
         A guild product was purchased.
 
-
 .. class:: MessageReferenceType
 
     Represents the type of a message reference.
 
     .. versionadded:: 2.1
 
-    .. attribute:: reply
+    .. attribute:: default
 
-        A message reply.
+        A standard reference used by message replies (:attr:`MessageType.reply`),
+        crossposted messaged created by a followed channel integration, and messages of type:
+
+        - :attr:`MessageType.pins_add`
+        - :attr:`MessageType.channel_follow_add`
+        - :attr:`MessageType.thread_created`
+        - :attr:`MessageType.thread_starter_message`
+        - :attr:`MessageType.poll_result`
+        - :attr:`MessageType.context_menu_command`
 
     .. attribute:: forward
 
         A forwarded message.
 
+    .. attribute:: reply
+
+        An alias for :attr:`.default`.
+
+.. class:: PromotionType
+
+    Represents the type of a promotion.
+
+    .. versionadded:: 2.1
+
+    .. attribute:: bogo
+
+        A "buy one get one" offer.
+
+    .. attribute:: partner
+
+        A partner promotion.
+
+    .. attribute:: third_party_inbound
+
+        A third-party inbound promotion.
+
+    .. attribute:: third_party_outbound
+
+        A third-party outbound promotion.
+
+    .. attribute:: marketing_moment
+
+        A marketing moment promotion.
+
+.. class:: StatusDisplayType
+
+    Represents which field is of the user's activity is
+    displayed in the members list.
+
+    .. versionadded:: 2.1
+
+    .. attribute:: name
+
+        The name of the activity is displayed.
+
+    .. attribute:: state
+
+        The state of the activity is displayed.
+
+    .. attribute:: details
+
+        The details of the activity are displayed.
+
+.. class:: OnboardingPromptType
+
+    Represents the type of onboarding prompt.
+
+    .. versionadded:: 2.1
+
+    .. attribute:: multiple_choice
+
+        Prompt options are multiple choice.
+
+    .. attribute:: dropdown
+
+        Prompt options are displayed as a drop-down.
+
+.. class:: OnboardingMode
+
+    Represents the onboarding constraint mode.
+
+    .. versionadded:: 2.1
+
     .. attribute:: default
 
-        An alias for :attr:`.reply`.
+        Only default channels count towards onboarding constraints.
+
+    .. attribute:: advanced
+
+        Default channels and questions count towards onboarding constraints.
+
+.. class:: CollectibleType
+
+    Represents the type of a :class:`Collectible`.
+
+    .. versionadded:: 2.1
+
+    .. attribute:: nameplate
+
+        The collectible is a nameplate.
+
+.. class:: NameplatePalette
+
+    Represents the available palettes for a nameplate.
+
+    .. versionadded:: 2.1
+
+    .. attribute:: crimson
+
+        The collectible nameplate palette is crimson.
+
+    .. attribute:: berry
+
+        The collectible nameplate palette is berry.
+
+    .. attribute:: sky
+
+        The collectible nameplate palette is sky.
+
+    .. attribute:: teal
+
+        The collectible nameplate palette is teal.
+
+    .. attribute:: forest
+
+        The collectible nameplate palette is forest.
+
+    .. attribute:: bubble_gum
+
+        The collectible nameplate palette is bubble gum.
+
+    .. attribute:: violet
+
+        The collectible nameplate palette is violet.
+
+    .. attribute:: cobalt
+
+        The collectible nameplate palette is cobalt.
+
+    .. attribute:: clover
+
+        The collectible nameplate palette is clover.
+
+    .. attribute:: lemon
+
+        The collectible nameplate palette is lemon.
+
+    .. attribute:: white
+
+        The collectible nameplate palette is white.
+
+.. class:: ExperimentPlatform
+
+    Represents a specific platform for an experiment.
+
+    .. versionadded:: 2.2
+
+    .. attribute:: developer_portal
+
+        The experiment is running on the developer portal.
+
+.. class:: ApexExperimentUnitType
+
+    Represents the unit type of an Apex experiment.
+
+    .. versionadded:: 2.2
+
+    .. attribute:: user
+
+        The experiment is per-user.
+
+    .. attribute:: installation
+
+        The experiment is per-installation.
+
+    .. attribute:: guild
+
+        The experiment is per-guild.
+
+    .. attribute:: custom
+
+        The experiment is using a custom unit type.
+
+.. class:: ApexExperimentSurface
+
+    Represents the surface an Apex experiment is running on.
+
+    .. versionadded:: 2.2
+
+    .. attribute:: api
+
+        The experiment is running on the API.
+
+    .. attribute:: app
+
+        The experiment is running on the Discord app.
+
+    .. attribute:: developer_portal
+
+        The experiment is running on the developer portal.
+
+    .. attribute:: admin_panel
+
+        The experiment is running on the admin panel.
+
+    .. attribute:: ads_budget_ab
+
+        The experiment is running on the ads portal.
 
 .. _discord-api-audit-logs:
 
@@ -6385,9 +7094,9 @@ AuditLogDiff
 
     .. attribute:: type
 
-        The type of channel, sticker, webhook or integration.
+        The type of channel, sticker, webhook, integration or onboarding prompt.
 
-        :type: Union[:class:`ChannelType`, :class:`StickerType`, :class:`WebhookType`, :class:`str`]
+        :type: Union[:class:`ChannelType`, :class:`StickerType`, :class:`WebhookType`, :class:`str`, :class:`OnboardingPromptType`]
 
     .. attribute:: topic
 
@@ -6473,6 +7182,24 @@ AuditLogDiff
         See also :attr:`Role.colour`
 
         :type: :class:`Colour`
+
+    .. attribute:: secondary_colour
+                   secondary_color
+
+        The secondary colour of a role.
+
+        See also :attr:`Role.secondary_colour`
+
+        :type: Optional[:class:`Colour`]
+
+    .. attribute:: tertiary_colour
+                   tertiary_color
+
+        The tertiary colour of a role.
+
+        See also :attr:`Role.tertiary_colour`
+
+        :type: Optional[:class:`Colour`]
 
     .. attribute:: hoist
 
@@ -6734,7 +7461,7 @@ AuditLogDiff
 
     .. attribute:: enabled
 
-        Whether the automod rule is active or not.
+        Whether guild onboarding or the automod rule is active or not.
 
         :type: :class:`bool`
 
@@ -6754,7 +7481,7 @@ AuditLogDiff
 
         The trigger for the automod rule.
 
-        .. note ::
+        .. note::
 
             The :attr:`~AutoModTrigger.type` of the trigger may be incorrect.
             Some attributes such as :attr:`~AutoModTrigger.keyword_filter`, :attr:`~AutoModTrigger.regex_patterns`,
@@ -6766,7 +7493,7 @@ AuditLogDiff
 
         The actions to take when an automod rule is triggered.
 
-        :type: List[AutoModRuleAction]
+        :type: List[:class:`AutoModRuleAction`]
 
     .. attribute:: exempt_roles
 
@@ -6810,11 +7537,11 @@ AuditLogDiff
 
     .. attribute:: flags
 
-        The channel flags associated with this thread or forum post.
+        The flags associated with this channel or invite.
 
-        See also :attr:`ForumChannel.flags` and :attr:`Thread.flags`
+        See also :attr:`ForumChannel.flags` and :attr:`Invite.flags`
 
-        :type: :class:`ChannelFlags`
+        :type: Union[:class:`ChannelFlags`, :class:`InviteFlags`]
 
     .. attribute:: default_thread_slowmode_delay
 
@@ -6848,8 +7575,71 @@ AuditLogDiff
 
         :type: Optional[:class:`PartialEmoji`]
 
-.. this is currently missing the following keys: reason
-   I'm not sure how to port these
+    .. attribute:: options
+
+        The onboarding prompt options associated with this onboarding prompt.
+
+        See also :attr:`OnboardingPrompt.options`
+
+        :type: List[:class:`OnboardingPromptOption`]
+
+    .. attribute:: default_channels
+
+        The default channels associated with the onboarding in this guild.
+
+        See also :attr:`Onboarding.default_channels`
+
+        :type: List[:class:`abc.GuildChannel`, :class:`Object`]
+
+    .. attribute:: prompts
+
+        The onboarding prompts associated with the onboarding in this guild.
+
+        See also :attr:`Onboarding.prompts`
+
+        :type: List[:class:`OnboardingPrompt`]
+
+    .. attribute:: title
+
+        The title of the onboarding prompt.
+
+        See also :attr:`OnboardingPrompt.title`
+
+        :type: :class:`str`
+
+    .. attribute:: single_select
+
+        Whether only one prompt option can be selected.
+
+        See also :attr:`OnboardingPrompt.single_select`
+
+        :type: :class:`bool`
+
+    .. attribute:: required
+
+        Whether the onboarding prompt is required to complete the onboarding.
+
+        See also :attr:`OnboardingPrompt.required`
+
+        :type: :class:`bool`
+
+    .. attribute:: in_onboarding
+
+        Whether this prompt is currently part of the onboarding flow.
+
+        See also :attr:`OnboardingPrompt.in_onboarding`
+
+        :type: :class:`bool`
+
+    .. attribute:: mode
+
+        The onboarding constraint mode.
+
+        See also :attr:`Onboarding.mode`
+
+        :type: :class:`OnboardingMode`
+
+
 
 Webhook Support
 ------------------
@@ -7052,9 +7842,24 @@ User
 .. autoclass:: ProfileBadge()
     :members:
 
-.. attributetable:: Note
+.. attributetable:: RecentAvatar
 
-.. autoclass:: Note()
+.. autoclass:: RecentAvatar()
+    :members:
+
+.. attributetable:: PrimaryGuild
+
+.. autoclass:: PrimaryGuild()
+    :members:
+
+.. attributetable:: DisplayNameStyle
+
+.. autoclass:: DisplayNameStyle()
+    :members:
+
+.. attributetable:: Collectible
+
+.. autoclass:: Collectible()
     :members:
 
 Affinity
@@ -7307,11 +8112,6 @@ Entitlement
 .. autoclass:: Entitlement()
     :members:
 
-.. attributetable:: EntitlementPayment
-
-.. autoclass:: EntitlementPayment()
-    :members:
-
 .. attributetable:: Gift
 
 .. autoclass:: Gift()
@@ -7320,11 +8120,6 @@ Entitlement
 .. attributetable:: GiftBatch
 
 .. autoclass:: GiftBatch()
-    :members:
-
-.. attributetable:: Achievement
-
-.. autoclass:: Achievement()
     :members:
 
 Library
@@ -7379,6 +8174,11 @@ Promotion
 .. attributetable:: DiscountOffer
 
 .. autoclass:: DiscountOffer()
+    :members:
+
+.. attributetable:: Discount
+
+.. autoclass:: Discount()
     :members:
 
 Subscription
@@ -8103,6 +8903,25 @@ WelcomeScreen
 .. autoclass:: WelcomeChannel()
     :members:
 
+Onboarding
+~~~~~~~~~~~
+
+.. attributetable:: Onboarding
+
+.. autoclass:: Onboarding()
+    :members:
+
+.. attributetable:: OnboardingPrompt
+
+.. autoclass:: OnboardingPrompt()
+    :members:
+
+
+.. attributetable:: OnboardingPromptOption
+
+.. autoclass:: OnboardingPromptOption()
+    :members:
+
 Tutorial
 ~~~~~~~~
 
@@ -8264,26 +9083,68 @@ Presence
 
 .. autoclass:: Activity()
     :members:
+    :inherited-members:
+
+.. attributetable:: ActivityTimestamps
+
+.. autoclass:: ActivityTimestamps()
+    :members:
+
+.. attributetable:: ActivityAssets
+
+.. autoclass:: ActivityAssets()
+    :members:
+
+.. attributetable:: ActivityImage
+
+.. autoclass:: ActivityImage()
+    :members:
+    :inherited-members:
+
+.. attributetable:: ActivityParty
+
+.. autoclass:: ActivityParty()
+    :members:
+
+.. attributetable:: ActivityButton
+
+.. autoclass:: ActivityButton()
+    :members:
+
+.. attributetable:: ActivitySecrets
+
+.. autoclass:: ActivitySecrets()
+    :members:
 
 .. attributetable:: Game
 
 .. autoclass:: Game()
     :members:
+    :inherited-members:
 
 .. attributetable:: Streaming
 
 .. autoclass:: Streaming()
     :members:
+    :inherited-members:
 
 .. attributetable:: Spotify
 
 .. autoclass:: Spotify()
     :members:
+    :inherited-members:
 
 .. attributetable:: CustomActivity
 
 .. autoclass:: CustomActivity()
     :members:
+    :inherited-members:
+
+.. attributetable:: HangActivity
+
+.. autoclass:: HangActivity()
+    :members:
+    :inherited-members:
 
 Permissions
 ~~~~~~~~~~~~
@@ -8352,8 +9213,28 @@ Experiment
 .. autoclass:: ExperimentRollout()
     :members:
 
+.. attributetable:: ApexExperiment
+
+.. autoclass:: ApexExperiment()
+    :members:
+
+.. attributetable:: ApexExperimentAssignment
+
+.. autoclass:: ApexExperimentAssignment()
+    :members:
+
 Flags
 ~~~~~~
+
+.. attributetable:: ActivityFlags
+
+.. autoclass:: ActivityFlags()
+    :members:
+
+.. attributetable:: ApexExperimentFlags
+
+.. autoclass:: ApexExperimentFlags()
+    :members:
 
 .. attributetable:: ApplicationFlags
 
@@ -8373,6 +9254,11 @@ Flags
 .. attributetable:: ChannelFlags
 
 .. autoclass:: ChannelFlags()
+    :members:
+
+.. attributetable:: EmbedFlags
+
+.. autoclass:: EmbedFlags()
     :members:
 
 .. attributetable:: FriendSourceFlags

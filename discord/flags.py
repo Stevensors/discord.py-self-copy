@@ -40,12 +40,17 @@ from typing import (
     Type,
     TypeVar,
     overload,
+    TypedDict,
 )
 
 from .enums import UserFlags
 
 if TYPE_CHECKING:
-    from typing_extensions import Self
+    from typing_extensions import Self, Unpack
+
+    class _MemberCacheFlagsKwargs(TypedDict, total=False):
+        voice: bool
+        joined: bool
 
 
 __all__ = (
@@ -56,6 +61,7 @@ __all__ = (
     'PrivateUserFlags',
     'MemberCacheFlags',
     'ApplicationFlags',
+    'ActivityFlags',
     'ChannelFlags',
     'PremiumUsageFlags',
     'PurchasedFlags',
@@ -76,7 +82,9 @@ __all__ = (
     'ReadStateFlags',
     'InviteFlags',
     'AttachmentFlags',
+    'EmbedFlags',
     'RoleFlags',
+    'ApexExperimentFlags',
 )
 
 BF = TypeVar('BF', bound='BaseFlags')
@@ -88,12 +96,10 @@ class flag_value:
         self.__doc__: Optional[str] = func.__doc__
 
     @overload
-    def __get__(self, instance: None, owner: Type[BF]) -> Self:
-        ...
+    def __get__(self, instance: None, owner: Type[BF]) -> Self: ...
 
     @overload
-    def __get__(self, instance: BF, owner: Type[BF]) -> bool:
-        ...
+    def __get__(self, instance: BF, owner: Type[BF]) -> bool: ...
 
     def __get__(self, instance: Optional[BF], owner: Type[BF]) -> Any:
         if instance is None:
@@ -534,6 +540,14 @@ class SystemChannelFlags(BaseFlags):
         """
         return 128
 
+    def emoji_added(self):
+        """:class:`bool`: Returns ``True`` if the system channel is used for
+        emoji added notifications.
+
+        .. versionadded:: 2.1
+        """
+        return 256
+
 
 @fill_with_flags()
 class MessageFlags(BaseFlags):
@@ -699,6 +713,24 @@ class MessageFlags(BaseFlags):
         .. versionadded:: 2.1
         """
         return 16384
+
+    @flag_value
+    def components_v2(self):
+        """:class:`bool`: Returns ``True`` if the message has Discord's v2 components.
+
+        Does not allow sending any ``content``, ``embed``, ``embeds``, ``stickers``, or ``poll``.
+
+        .. versionadded:: 2.1
+        """
+        return 32768
+
+    @flag_value
+    def social_layer_integration(self):
+        """:class:`bool`: Returns ``True`` if the message is sent via the Social Layer Integration.
+
+        .. versionadded:: 2.1
+        """
+        return 65536
 
 
 @fill_with_flags()
@@ -872,6 +904,8 @@ class PublicUserFlags(BaseFlags):
         """:class:`bool`: Returns ``True`` if the user is an active developer.
 
         .. versionadded:: 2.0
+
+        .. deprecated:: 2.1
         """
         return UserFlags.active_developer.value
 
@@ -1098,13 +1132,23 @@ class PurchasedFlags(BaseFlags):
     __slots__ = ()
 
     @flag_value
-    def nitro_classic(self):
+    def premium_tier_1(self):
         """:class:`bool`: Returns ``True`` if the user has purchased Nitro classic."""
         return 1 << 0
 
+    @alias_flag_value
+    def nitro_classic(self):
+        """:class:`bool`: An alias for :attr:`premium_tier_1`."""
+        return 1 << 0
+
     @flag_value
-    def nitro(self):
+    def premium_tier_2(self):
         """:class:`bool`: Returns ``True`` if the user has purchased Nitro."""
+        return 1 << 1
+
+    @alias_flag_value
+    def nitro(self):
+        """:class:`bool`: An alias for :attr:`premium_tier_2`."""
         return 1 << 1
 
     @flag_value
@@ -1112,10 +1156,28 @@ class PurchasedFlags(BaseFlags):
         """:class:`bool`: Returns ``True`` if the user has purchased a guild boost."""
         return 1 << 2
 
+    @alias_flag_value
+    def premium_guild_subscription(self):
+        """:class:`bool`: An alias for :attr:`guild_boost`."""
+        return 1 << 2
+
     @flag_value
-    def nitro_basic(self):
+    def premium_tier_3(self):
         """:class:`bool`: Returns ``True`` if the user has purchased Nitro basic."""
         return 1 << 3
+
+    @alias_flag_value
+    def nitro_basic(self):
+        """:class:`bool`: An alias for :attr:`premium_tier_3`."""
+        return 1 << 3
+
+    @flag_value
+    def on_reverse_trial(self):
+        """:class:`bool`: Returns ``True`` if the user has a reverse trial active.
+
+        .. versionadded:: 2.1
+        """
+        return 1 << 4
 
 
 @fill_with_flags()
@@ -1187,7 +1249,7 @@ class MemberCacheFlags(BaseFlags):
 
     __slots__ = ()
 
-    def __init__(self, **kwargs: bool):
+    def __init__(self, **kwargs: Unpack[_MemberCacheFlagsKwargs]) -> None:
         bits = max(self.VALID_FLAGS.values()).bit_length()
         self.value: int = (1 << bits) - 1
         for key, value in kwargs.items():
@@ -1296,6 +1358,24 @@ class ApplicationFlags(BaseFlags):
 
     __slots__ = ()
 
+    def _to_intents(self) -> int:
+        # Start with a base value of 0
+        intents = 0
+
+        if self.gateway_presence_limited or self.gateway_presence:
+            intents |= 1 << 12
+        if self.gateway_guild_members_limited or self.gateway_guild_members:
+            intents |= 1 << 14
+        if self.gateway_message_content_limited or self.gateway_message_content:
+            intents |= 1 << 18
+
+        return intents
+
+    @flag_value
+    def embedded_released(self):
+        """:class:`bool`: Returns ``True`` if the embedded application is released to the public."""
+        return 1 << 1
+
     @flag_value
     def managed_emoji(self):
         """:class:`bool`: Returns ``True`` if the application has the ability to create managed emoji."""
@@ -1310,6 +1390,14 @@ class ApplicationFlags(BaseFlags):
     def group_dm_create(self):
         """:class:`bool`: Returns ``True`` if the application has the ability to create group DMs without limit."""
         return 1 << 4
+
+    @flag_value
+    def rpc_private_beta(self):
+        """:class:`bool`: Returns ``True`` if the application can use the ``rpc`` scope without limitation.
+
+        .. versionadded:: 2.1
+        """
+        return 1 << 5
 
     @flag_value
     def automod_badge(self):
@@ -1342,6 +1430,22 @@ class ApplicationFlags(BaseFlags):
         .. versionadded:: 2.1
         """
         return 1 << 9
+
+    @flag_value
+    def social_layer_integration_limited(self):
+        """:class:`bool`: Returns ``True`` if the application has limited access to the social layer SDK.
+
+        .. versionadded:: 2.1
+        """
+        return 1 << 10
+
+    @flag_value
+    def cloud_gaming_demo(self):
+        """:class:`bool`: Returns ``True`` if the application is trialing cloud gaming features.
+
+        .. versionadded:: 2.1
+        """
+        return 1 << 11
 
     @flag_value
     def gateway_presence(self):
@@ -1401,6 +1505,11 @@ class ApplicationFlags(BaseFlags):
         return 1 << 20
 
     @flag_value
+    def application_command_migrated(self):
+        # Unknown
+        return 1 << 21
+
+    @flag_value
     def application_command_badge(self):
         """:class:`bool`: Returns ``True`` if the application has registered global application commands."""
         return 1 << 23
@@ -1413,24 +1522,152 @@ class ApplicationFlags(BaseFlags):
         return 1 << 24
 
     @flag_value
+    def active_grace_period(self):
+        """:class:`bool`: Returns ``True`` if the application has not had any global command executed in
+        the past 30 days and has lost the active flag.
+
+        .. versionadded:: 2.1
+        """
+        return 1 << 25
+
+    @flag_value
     def iframe_modal(self):
-        """:class:`bool`: Returns ``True`` if the application can use iframes within modals."""
+        """:class:`bool`: Returns ``True`` if the application can use iframes within modals.
+
+        .. versionadded:: 2.1
+        """
         return 1 << 26
 
     @flag_value
     def social_layer_integration(self):
-        """:class:`bool`: Returns ``True`` if the application can use the social layer SDK."""
+        """:class:`bool`: Returns ``True`` if the application can use the social layer SDK.
+
+        .. versionadded:: 2.1
+        """
         return 1 << 27
 
     @flag_value
     def promoted(self):
-        """:class:`bool`: Returns ``True`` if the application is promoted by Discord."""
+        """:class:`bool`: Returns ``True`` if the application is promoted by Discord.
+
+        .. versionadded:: 2.1
+        """
         return 1 << 29
 
     @flag_value
     def partner(self):
-        """:class:`bool`: Returns ``True`` if the application is a Discord partner."""
+        """:class:`bool`: Returns ``True`` if the application is a Discord partner.
+
+        .. versionadded:: 2.1
+        """
         return 1 << 30
+
+    @flag_value
+    def parent(self):
+        """:class:`bool`: Returns ``True`` if the application is a parent application.
+
+        .. versionadded:: 2.1
+        """
+        return 1 << 33
+
+    @flag_value
+    def disable_relationship_access(self):
+        """:class:`bool`: Returns ``True`` if the application cannot access relationship information.
+
+        .. versionadded:: 2.1
+        """
+        return 1 << 34
+
+
+@fill_with_flags()
+class ActivityFlags(BaseFlags):
+    r"""Wraps up the Discord activity flags.
+
+    .. container:: operations
+
+        .. describe:: x == y
+
+            Checks if two ActivityFlags are equal.
+        .. describe:: x | y, x |= y
+
+            Returns a ActivityFlags instance with all enabled flags from
+            both x and y.
+        .. describe:: x & y, x &= y
+
+            Returns a ActivityFlags instance with only flags enabled on
+            both x and y.
+        .. describe:: x ^ y, x ^= y
+
+            Returns a ActivityFlags instance with only flags enabled on
+            only one of x or y, not on both.
+        .. describe:: ~x
+
+            Returns a ActivityFlags instance with all flags inverted from x.
+        .. describe:: hash(x)
+
+            Return the flag's hash.
+        .. describe:: iter(x)
+
+            Returns an iterator of ``(name, value)`` pairs. This allows it
+            to be, for example, constructed as a dict or a list of pairs.
+            Note that aliases are not shown.
+        .. describe:: bool(b)
+
+            Returns whether any flag is set to ``True``.
+
+    .. versionadded:: 2.1
+
+    Attributes
+    -----------
+    value: :class:`int`
+        The raw value. You should query flags via the properties
+        rather than using this raw value.
+    """
+
+    @flag_value
+    def instance(self):
+        """:class:`bool`: Returns ``True`` if the activity is is an instanced game session (a match that will end)."""
+        return 1 << 0
+
+    @flag_value
+    def join(self):
+        """:class:`bool`: Returns ``True`` if the activity is joinable."""
+        return 1 << 1
+
+    @flag_value
+    def spectate(self):
+        """:class:`bool`: Returns ``True`` if the activity is spectable."""
+        return 1 << 2
+
+    @flag_value
+    def sync(self):
+        """:class:`bool`: Returns ``True`` if the activity is syncable."""
+        return 1 << 4
+
+    @flag_value
+    def play(self):
+        """:class:`bool`: Returns ``True`` if the activity is playable."""
+        return 1 << 5
+
+    @flag_value
+    def party_privacy_friends(self):
+        """:class:`bool`: Returns ``True`` if the activity's party can only be joined by friends."""
+        return 1 << 6
+
+    @flag_value
+    def party_privacy_voice_channel(self):
+        """:class:`bool`: Returns ``True`` if the activity's party can only be joined by people in the same voice channel."""
+        return 1 << 7
+
+    @flag_value
+    def embedded(self):
+        """:class:`bool`: Returns ``True`` if the activity is embedded into Discord."""
+        return 1 << 8
+
+    @flag_value
+    def contextless(self):
+        """:class:`bool`: Returns ``True`` if the activity can be launched without a context."""
+        return 1 << 9
 
 
 @fill_with_flags()
@@ -1481,14 +1718,78 @@ class ChannelFlags(BaseFlags):
     __slots__ = ()
 
     @flag_value
+    def guild_feed_removed(self):
+        """:class:`bool`: Returns ``True`` if the guild channel is hidden from the guild's feed.
+
+        .. versionadded:: 2.1
+        """
+        return 1 << 0
+
+    @flag_value
     def pinned(self):
         """:class:`bool`: Returns ``True`` if the thread is pinned to the forum channel."""
         return 1 << 1
 
     @flag_value
+    def active_channels_removed(self):
+        """:class:`bool`: Returns ``True`` if the guild channel has been removed from the guild's active channels.
+
+        .. versionadded:: 2.1
+        """
+        return 1 << 2
+
+    @flag_value
     def require_tag(self):
         """:class:`bool`: Returns ``True`` if a tag is required to be specified when creating a thread in a :class:`ForumChannel`."""
         return 1 << 4
+
+    @flag_value
+    def spam(self):
+        """:class:`bool`: Returns ``True`` if the channel is marked as spam.
+
+        .. versionadded:: 2.1
+        """
+        return 1 << 5
+
+    @flag_value
+    def guild_resource_channel(self):
+        """:class:`bool`: Returns ``True`` if the guild channel is used as a read-only resource for onboarding and is not shown in the channel list.
+
+        .. versionadded:: 2.1
+        """
+        return 1 << 7
+
+    @flag_value
+    def clyde_ai(self):
+        """:class:`bool`: Returns ``True`` if the channel is created by Clyde AI, which has full access to all message content.
+
+        .. versionadded:: 2.1
+        """
+        return 1 << 8
+
+    @flag_value
+    def summaries_disabled(self):
+        """:class:`bool`: Returns ``True`` if the guild channel has summaries disabled.
+
+        .. versionadded:: 2.1
+        """
+        return 1 << 11
+
+    @flag_value
+    def role_subscription_template_preview_channel(self):
+        """:class:`bool`: Returns ``True`` if the role subscription tier for this guild channel has not been published yet.
+
+        .. versionadded:: 2.1
+        """
+        return 1 << 13
+
+    @flag_value
+    def broadcasting(self):
+        """:class:`bool`: Returns ``True`` if the group DM is used for broadcasting a live stream.
+
+        .. versionadded:: 2.1
+        """
+        return 1 << 14
 
     @flag_value
     def hide_media_download_options(self):
@@ -1498,6 +1799,22 @@ class ChannelFlags(BaseFlags):
         .. versionadded:: 2.1
         """
         return 1 << 15
+
+    @flag_value
+    def join_request_interview_channel(self):
+        """:class:`bool`: Returns ``True`` if the group DM is used for guild join request interviews.
+
+        .. versionadded:: 2.1
+        """
+        return 1 << 16
+
+    @flag_value
+    def moderator_report_channel(self):
+        """:class:`bool`: Returns ``True`` if the forum channel is the guild's moderator queue.
+
+        .. versionadded:: 2.1
+        """
+        return 1 << 19
 
 
 @fill_with_flags()
@@ -1618,12 +1935,12 @@ class SKUFlags(BaseFlags):
 
     @flag_value
     def premium_purchase(self):
-        """:class:`bool`: Returns ``True`` if the SKU is a premium purchase."""
+        """:class:`bool`: Returns ``True`` if the SKU is available for free to premium users."""
         return 1 << 0
 
     @flag_value
     def free_premium_content(self):
-        """:class:`bool`: Returns ``True`` if the SKU is free premium content."""
+        """:class:`bool`: Returns ``True`` if the SKU has free premium content."""
         return 1 << 1
 
     @flag_value
@@ -1633,7 +1950,7 @@ class SKUFlags(BaseFlags):
 
     @flag_value
     def premium_and_distribution(self):
-        """:class:`bool`: Returns ``True`` if the SKU is a premium or distribution product."""
+        """:class:`bool`: Returns ``True`` if the SKU is available for free to premium users and purchasable normally."""
         return 1 << 3
 
     @flag_value
@@ -1650,6 +1967,14 @@ class SKUFlags(BaseFlags):
     def premium_subscription(self):
         """:class:`bool`: Returns ``True`` if the SKU is a Discord premium subscription or related first-party product.
         These are subscriptions like Nitro and Server Boosts. These are the only giftable subscriptions.
+        """
+        return 1 << 6
+
+    @alias_flag_value
+    def available_for_premium_gifting(self):
+        """:class:`bool`: An alias for :attr:`premium_subscription`.
+
+        .. versionadded:: 2.1
         """
         return 1 << 6
 
@@ -1679,6 +2004,14 @@ class SKUFlags(BaseFlags):
         .. versionadded:: 2.1
         """
         return 1 << 10
+
+    @flag_value
+    def available_for_application_gifting(self):
+        """:class:`bool`: Returns ``True`` if the SKU is a giftable application product.
+
+        .. versionadded:: 2.1
+        """
+        return 1 << 11
 
 
 @fill_with_flags()
@@ -1741,7 +2074,10 @@ class PaymentFlags(BaseFlags):
 
     @flag_value
     def user_refunded(self):
-        """:class:`bool`: Returns ``True`` if the payment has been self-refunded"""
+        """:class:`bool`: Returns ``True`` if the payment has been self-refunded.
+
+        .. versionadded:: 2.1
+        """
         return 1 << 2
 
     @flag_value
@@ -1752,13 +2088,17 @@ class PaymentFlags(BaseFlags):
     # TODO: The below are assumptions
 
     @flag_value
+    def pending(self):
+        """:class:`bool`: Returns ``True`` if the automatic payment is pending manual authorization by the user.
+
+        .. versionadded:: 2.1
+        """
+        return 1 << 4
+
+    @flag_value
     def temporary_authorization(self):
         """:class:`bool`: Returns ``True`` if the payment is a temporary authorization."""
         return 1 << 5
-
-    @flag_value
-    def unknown(self):
-        return 1 << 6
 
 
 @fill_with_flags()
@@ -2005,6 +2345,14 @@ class LibraryApplicationFlags(BaseFlags):
         """:class:`bool`: Returns ``True`` if the library application is free for premium users."""
         return 1 << 4
 
+    @flag_value
+    def overlay_v3_disabled(self):
+        """:class:`bool`: Returns ``True`` if the library application has the new Discord overlay implementation disabled.
+
+        .. versionadded:: 2.1
+        """
+        return 1 << 5
+
 
 @fill_with_flags()
 class ApplicationDiscoveryFlags(BaseFlags):
@@ -2249,8 +2597,10 @@ class FriendSourceFlags(BaseFlags):
     __slots__ = ()
 
     @classmethod
-    def _from_dict(cls, data: dict) -> Self:
+    def _from_dict(cls, data: Optional[dict]) -> Self:
         self = cls()
+        if not data:
+            return self
         if data.get('mutual_friends'):
             self.mutual_friends = True
         if data.get('mutual_guilds'):
@@ -2665,6 +3015,42 @@ class MemberFlags(BaseFlags):
         """
         return 1 << 4
 
+    @flag_value
+    def started_home_actions(self):
+        """:class:`bool`: Returns ``True`` if the member has started the new member actions in the server guide."""
+        return 1 << 5
+
+    @flag_value
+    def completed_home_actions(self):
+        """:class:`bool`: Returns ``True`` if the member has completed all of the new member actions in the server guide."""
+        return 1 << 6
+
+    @flag_value
+    def automod_quarantined_name(self):
+        """:class:`bool`: Returns ``True`` if the member's has been
+        quarantined by AutoMod due to their username, display name, or nickname.
+
+        .. versionadded:: 2.1
+        """
+        return 1 << 7
+
+    @flag_value
+    def dm_settings_upsell_acknowledged(self):
+        """:class:`bool`: Returns ``True`` if the member has acknowledged the DM privacy settings upsell modal.
+
+        .. versionadded:: 2.1
+        """
+        return 1 << 9
+
+    @flag_value
+    def automod_quarantined_guild_tag(self):
+        """:class:`bool`: Returns ``True`` if the member's has been
+        quarantined by AutoMod due to their guild tag.
+
+        .. versionadded:: 2.1
+        """
+        return 1 << 10
+
 
 @fill_with_flags()
 class ReadStateFlags(BaseFlags):
@@ -2725,6 +3111,11 @@ class ReadStateFlags(BaseFlags):
     def thread(self):
         """:class:`bool`: Returns ``True`` if the read state is for a thread."""
         return 1 << 1
+
+    @flag_value
+    def mention_low_importance(self):
+        """:class:`bool`: Returns ``True`` if the read state mention count is low importance."""
+        return 1 << 2
 
 
 @fill_with_flags()
@@ -2792,6 +3183,11 @@ class InviteFlags(BaseFlags):
         """:class:`bool`: Returns ``True`` if the invite is enhanced."""
         return 1 << 2
 
+    @flag_value
+    def application_bypass(self):
+        """:class:`bool`: Returns ``True`` if the invite bypasses guild join requests and adds the user directly to the guild with :attr:`discord.Member.pending` set to ``False``."""
+        return 1 << 3
+
 
 @fill_with_flags()
 class AttachmentFlags(BaseFlags):
@@ -2856,6 +3252,103 @@ class AttachmentFlags(BaseFlags):
         """:class:`bool`: Returns ``True`` if the attachment has been edited using the remix feature."""
         return 1 << 2
 
+    @flag_value
+    def spoiler(self):
+        """:class:`bool`: Returns ``True`` if the attachment was marked as a spoiler."""
+        return 1 << 3
+
+    @flag_value
+    def contains_explicit_media(self):
+        """:class:`bool`: Returns ``True`` if the attachment is flagged as explicit media."""
+        return 1 << 4
+
+    @flag_value
+    def animated(self):
+        """:class:`bool`: Returns ``True`` if the attachment is an animated image."""
+        return 1 << 5
+
+    @flag_value
+    def contains_gore_content(self):
+        """:class:`bool`: Returns ``True`` if the attachment is flagged as gore content."""
+        return 1 << 6
+
+    @flag_value
+    def contains_self_harm_content(self):
+        """:class:`bool`: Returns ``True`` if the attachment is flagged as self-harm content."""
+        return 1 << 7
+
+
+@fill_with_flags()
+class EmbedFlags(BaseFlags):
+    r"""Wraps up the Discord Embed flags
+
+    .. versionadded:: 2.1
+
+    .. container:: operations
+
+        .. describe:: x == y
+
+            Checks if two EmbedFlags are equal.
+
+        .. describe:: x != y
+
+            Checks if two EmbedFlags are not equal.
+
+        .. describe:: x | y, x |= y
+
+            Returns an EmbedFlags instance with all enabled flags from
+            both x and y.
+
+        .. describe:: x ^ y, x ^= y
+
+            Returns an EmbedFlags instance with only flags enabled on
+            only one of x or y, not on both.
+
+        .. describe:: ~x
+
+            Returns an EmbedFlags instance with all flags inverted from x.
+
+        .. describe:: hash(x)
+
+            Returns the flag's hash.
+
+        .. describe:: iter(x)
+
+            Returns an iterator of ``(name, value)`` pairs. This allows it
+            to be, for example, constructed as a dict or a list of pairs.
+            Note that aliases are not shown.
+
+        .. describe:: bool(b)
+
+            Returns whether any flag is set to ``True``.
+
+    Attributes
+    ----------
+    value: :class:`int`
+        The raw value. You should query flags via the properties
+        rather than using this raw value.
+    """
+
+    @flag_value
+    def contains_explicit_media(self):
+        """:class:`bool`: Returns ``True`` if the embed was flagged as sensitive content."""
+        return 1 << 4
+
+    @flag_value
+    def content_inventory_entry(self):
+        """:class:`bool`: Returns ``True`` if the embed is a legacy content inventory entry."""
+        return 1 << 5
+
+    @flag_value
+    def contains_gore_content(self):
+        """:class:`bool`: Returns ``True`` if the embed was flagged as gore content."""
+        return 1 << 6
+
+    @flag_value
+    def contains_self_harm_content(self):
+        """:class:`bool`: Returns ``True`` if the embed was flagged as self-harm content."""
+        return 1 << 7
+
 
 @fill_with_flags()
 class RoleFlags(BaseFlags):
@@ -2917,3 +3410,74 @@ class RoleFlags(BaseFlags):
     def in_prompt(self):
         """:class:`bool`: Returns ``True`` if the role can be selected by members in an onboarding prompt."""
         return 1 << 0
+
+
+@fill_with_flags()
+class ApexExperimentFlags(BaseFlags):
+    r"""Wraps up the Discord Apex experiment assignment flags.
+
+    .. container:: operations
+
+        .. describe:: x == y
+
+            Checks if two ApexExperimentFlags are equal.
+        .. describe:: x != y
+
+            Checks if two ApexExperimentFlags are not equal.
+        .. describe:: x | y, x |= y
+
+            Returns a ApexExperimentFlags instance with all enabled flags from
+            both x and y.
+        .. describe:: x & y, x &= y
+
+            Returns a ApexExperimentFlags instance with only flags enabled on
+            both x and y.
+        .. describe:: x ^ y, x ^= y
+
+            Returns a ApexExperimentFlags instance with only flags enabled on
+            only one of x or y, not on both.
+        .. describe:: ~x
+
+            Returns a ApexExperimentFlags instance with all flags inverted from x.
+        .. describe:: hash(x)
+
+            Return the flag's hash.
+        .. describe:: iter(x)
+
+            Returns an iterator of ``(name, value)`` pairs. This allows it
+            to be, for example, constructed as a dict or a list of pairs.
+            Note that aliases are not shown.
+        .. describe:: bool(b)
+
+            Returns whether any flag is set to ``True``.
+
+    .. versionadded:: 2.2
+
+    Attributes
+    -----------
+    value: :class:`int`
+        The raw value. You should query flags via the properties
+        rather than using this raw value.
+    """
+
+    __slots__ = ()
+
+    @flag_value
+    def override(self):
+        """:class:`bool`: Returns ``True`` if the experiment assignment is an override."""
+        return 1 << 0
+
+    @flag_value
+    def exposure_tracking_enabled(self):
+        """:class:`bool`: Returns ``True`` if the experiment assignment has exposure tracking enabled."""
+        return 1 << 1
+
+    @flag_value
+    def dependent_experiment(self):
+        """:class:`bool`: Returns ``True`` if the experiment assignment is dependent on another experiment."""
+        return 1 << 2
+
+    @flag_value
+    def use_as_eligibility(self):
+        """:class:`bool`: Returns ``True`` if the experiment assignment should be used as eligibility"""
+        return 1 << 3

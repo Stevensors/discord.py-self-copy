@@ -26,12 +26,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Dict, Final, Iterator, List, Optional, Sequence, Tuple, Union
 
-from .enums import HubType, try_enum
+from .enums import ApexExperimentUnitType, HubType, try_enum
+from .flags import ApexExperimentFlags
 from .metadata import Metadata
-from .utils import SequenceProxy, SnowflakeList, murmurhash32, utcnow
+from .utils import SequenceProxy, SnowflakeList, cached_slot_property, murmurhash32, utcnow
 
 if TYPE_CHECKING:
     from .abc import Snowflake
+    from .client import Client
     from .guild import Guild
     from .state import ConnectionState
     from .types.experiment import (
@@ -41,6 +43,8 @@ if TYPE_CHECKING:
         Population as PopulationPayload,
         Rollout as RolloutPayload,
         UserExperiment as AssignmentPayload,
+        ApexExperimentResponse as ApexExperimentResponsePayload,
+        ApexExperimentAssignment as ApexExperimentAssignmentPayload,
     )
 
 __all__ = (
@@ -51,6 +55,8 @@ __all__ = (
     'HoldoutExperiment',
     'GuildExperiment',
     'UserExperiment',
+    'ApexExperimentAssignment',
+    'ApexExperiment',
 )
 
 
@@ -351,6 +357,25 @@ class ExperimentPopulation:
     def __contains__(self, item: Guild, /) -> bool:
         return self.bucket_for(item) != -1
 
+    def is_eligible(self, guild: Guild, /) -> bool:
+        """Checks whether the guild is eligible for the population.
+
+        .. note::
+
+            This function is not intended to be used directly. Instead, use :func:`GuildExperiment.bucket_for`.
+
+        Parameters
+        -----------
+        guild: :class:`Guild`
+            The guild to check.
+
+        Returns
+        --------
+        :class:`bool`
+            Whether the guild is eligible for the population.
+        """
+        return self.filters.is_eligible(guild)
+
     def bucket_for(self, guild: Guild, _result: Optional[int] = None, /) -> int:
         """Returns the assigned experiment bucket within a population for a guild.
         Defaults to None (-1) if the guild is not in the population.
@@ -374,11 +399,11 @@ class ExperimentPopulation:
         :class:`int`
             The experiment bucket.
         """
-        if _result is None:
-            _result = self.experiment.result_for(guild)
-
         if not self.filters.is_eligible(guild):
             return -1
+
+        if _result is None:
+            _result = self.experiment.result_for(guild)
 
         for rollout in self.rollouts:
             for start, end in rollout.ranges:
@@ -438,12 +463,12 @@ class ExperimentOverride:
 
     @property
     def ids(self) -> Sequence[int]:
-        """Sequence[:class:`int`]: The eligible guild/user IDs for the override."""
+        """Sequence[:class:`int`]: The eligible guild IDs for the override."""
         return SequenceProxy(self._ids)
 
 
 class HoldoutExperiment:
-    """Represents an experiment dependency.
+    """Represents an experiment holdout.
 
     .. container:: operations
 
@@ -456,14 +481,14 @@ class HoldoutExperiment:
     Attributes
     -----------
     dependent: :class:`GuildExperiment`
-        The experiment that depends on this experiment.
+        The experiment that this holdout blocks.
     name: :class:`str`
         The name of the dependency.
     bucket: :class:`int`
         The required bucket of the dependency.
     """
 
-    __slots__ = ('dependent', 'name', 'bucket')
+    __slots__ = ('dependent', 'name', 'bucket', '_hash')
 
     def __init__(self, dependent: GuildExperiment, name: str, bucket: int):
         self.dependent = dependent
@@ -471,23 +496,27 @@ class HoldoutExperiment:
         self.bucket: int = bucket
 
     def __repr__(self) -> str:
-        return f'<HoldoutExperiment dependent={self.dependent!r} name={self.name!r} bucket={self.bucket}>'
+        return f'<HoldoutExperiment name={self.name!r} bucket={self.bucket}>'
 
     def __contains__(self, item: Guild) -> bool:
-        return self.is_eligible(item)
+        return self.is_blocked(item)
+
+    @cached_slot_property('_hash')
+    def hash(self) -> int:
+        """:class:`int`: The 32-bit unsigned Murmur3 hash of the dependency name."""
+        return murmurhash32(self.name, signed=False)
 
     @property
     def experiment(self) -> Optional[GuildExperiment]:
         """Optional[:class:`GuildExperiment`]: The experiment dependency, if found."""
-        experiment_hash = murmurhash32(self.name, signed=False)
-        experiment = self.dependent._state.guild_experiments.get(experiment_hash)
+        experiment = self.dependent._state.guild_experiments.get(self.hash)
         if experiment and not experiment.name:
             # Backfill the name
             experiment._name = self.name
         return experiment
 
-    def is_eligible(self, guild: Guild, /) -> bool:
-        """Checks whether the guild fulfills the dependency.
+    def is_blocked(self, guild: Guild, /) -> bool:
+        """Checks whether the guild is blocked by the holdout.
 
         .. note::
 
@@ -501,12 +530,12 @@ class HoldoutExperiment:
         Returns
         --------
         :class:`bool`
-            Whether the guild fulfills the dependency.
+            Whether the guild is blocked by the holdout.
         """
         experiment = self.experiment
-        if experiment is None:
-            # We don't have the experiment, so we can't check
-            return True
+        if self.hash == self.dependent.hash or experiment is None:
+            # We don't have the experiment so there is no holdout
+            return False
 
         return experiment.bucket_for(guild) == self.bucket
 
@@ -543,10 +572,10 @@ class GuildExperiment:
     overrides_formatted: List[List[:class:`ExperimentPopulation`]]
         Additional rollout populations for the experiment.
     holdout: Optional[:class:`HoldoutExperiment`]
-        The experiment this experiment depends on, if any.
+        An experiment that blocks the rollout of this experiment.
     aa_mode: :class:`bool`
         Whether the experiment is in A/A mode.
-    trigger_debugging:
+    trigger_debugging: :class:`bool`
         Whether experiment analytics trigger debugging is enabled.
     """
 
@@ -604,6 +633,8 @@ class GuildExperiment:
     def __eq__(self, other: object, /) -> bool:
         if isinstance(other, GuildExperiment):
             return self.hash == other.hash
+        elif isinstance(other, UserExperiment):
+            return False
         return NotImplemented
 
     @property
@@ -646,7 +677,7 @@ class GuildExperiment:
 
         return murmurhash32(f'{self.name}:{guild.id}', signed=False) % 10000
 
-    def bucket_for(self, guild: Guild, /) -> int:
+    def bucket_for(self, guild: Guild, /, *, aa_mode: bool = False) -> int:
         """Returns the assigned experiment bucket for a guild.
         Defaults to None (-1) if the guild is not in the experiment.
 
@@ -654,6 +685,10 @@ class GuildExperiment:
         -----------
         guild: :class:`Guild`
             The guild to compute experiment eligibility for.
+        aa_mode: :class:`bool`
+            Whether to return the bucket for A/A mode.
+            Otherwise, always returns None (-1) for populations in A/A mode.
+            Does nothing if the experiment is not in A/A mode.
 
         Raises
         ------
@@ -665,32 +700,28 @@ class GuildExperiment:
         :class:`int`
             The experiment bucket.
         """
-        # Holdout must be fulfilled
-        if self.holdout and not self.holdout.is_eligible(guild):
-            return -1
-
-        hash_result = self.result_for(guild)
-
         # Overrides take precedence
-        # And yes, they can be assigned to a user ID
         for override in self.overrides:
-            if guild.id in override.ids or guild.owner_id in override.ids:
+            if guild.id in override.ids:
                 return override.bucket
 
+        hash_result = self.result_for(guild)
         for overrides in self.overrides_formatted:
             for override in overrides:
-                pop_bucket = override.bucket_for(guild, hash_result)
-                if pop_bucket != -1:
-                    return pop_bucket
+                if override.is_eligible(guild):
+                    return override.bucket_for(guild, hash_result)
 
         # a/a mode is always -1 without an override
-        if self.aa_mode:
+        if self.aa_mode and not aa_mode:
+            return -1
+
+        # Holdout must not be fulfilled
+        if self.holdout and self.holdout.is_blocked(guild):
             return -1
 
         for population in self.populations:
-            pop_bucket = population.bucket_for(guild, hash_result)
-            if pop_bucket != -1:
-                return pop_bucket
+            if population.is_eligible(guild):
+                return population.bucket_for(guild, hash_result)
 
         return -1
 
@@ -751,9 +782,12 @@ class UserExperiment:
         Whether the user has an explicit bucket override.
     population: :class:`int`
         The internal population group for the user, or None (-1) if manually overridden.
+    holdout: Optional[:class:`UserExperiment`]
+        An experiment that blocks the rollout of this experiment.
+        Only present if the user has an assignment in the holdout.
     aa_mode: :class:`bool`
         Whether the experiment is in A/A mode.
-    trigger_debugging:
+    trigger_debugging: :class:`bool`
         Whether experiment analytics trigger debugging is enabled.
     """
 
@@ -768,10 +802,24 @@ class UserExperiment:
         '_result',
         'aa_mode',
         'trigger_debugging',
+        'holdout',
     )
 
     def __init__(self, *, state: ConnectionState, data: AssignmentPayload):
-        (hash, revision, bucket, override, population, hash_result, aa_mode, trigger_debugging, *_) = data
+        (
+            hash,
+            revision,
+            bucket,
+            override,
+            population,
+            hash_result,
+            aa_mode,
+            trigger_debugging,
+            holdout_name,
+            holdout_revision,
+            holdout_bucket,
+            *_,
+        ) = data
 
         self._state = state
         self._name: Optional[str] = None
@@ -784,6 +832,33 @@ class UserExperiment:
         self.aa_mode: bool = aa_mode == 1
         self.trigger_debugging: bool = trigger_debugging == 1
 
+        self.holdout: Optional[UserExperiment] = None
+        if holdout_name is not None:
+            holdout_hash = murmurhash32(holdout_name, signed=False)
+            self.holdout = state.experiments.get(holdout_hash) or UserExperiment.from_holdout(
+                state, holdout_hash, holdout_name, holdout_revision, holdout_bucket
+            )
+
+    @classmethod
+    def from_holdout(
+        cls, state: ConnectionState, hash: int, name: str, revision: Optional[int], bucket: Optional[int]
+    ) -> UserExperiment:
+        self = cls.__new__(cls)
+        self._state = state
+        self._name = name
+        self.hash = hash
+        self.revision = revision or 0
+        self.assignment = bucket or -1
+
+        # Most of these fields are defaults
+        self.override = False
+        self.population = 0
+        self._result = -1
+        self.aa_mode = False
+        self.trigger_debugging = False
+        self.holdout = None
+        return self
+
     def __repr__(self) -> str:
         return f'<UserExperiment hash={self.hash}{f" name={self._name!r}" if self._name else ""} bucket={self.bucket}>'
 
@@ -793,6 +868,8 @@ class UserExperiment:
     def __eq__(self, other: object, /) -> bool:
         if isinstance(other, UserExperiment):
             return self.hash == other.hash
+        elif isinstance(other, GuildExperiment):
+            return False
         return NotImplemented
 
     @property
@@ -828,9 +905,253 @@ class UserExperiment:
         :exc:`ValueError`
             The experiment name is unset without a precomputed result.
         """
-        if self._result:
+        if self._result >= 0:
             return self._result
         elif not self.name:
             raise ValueError('The experiment name must be set to compute the result')
         else:
-            return murmurhash32(f'{self.name}:{self._state.self_id}', signed=False) % 10000
+            result = murmurhash32(f'{self.name}:{self._state.self_id}', signed=False) % 10000
+            self._result = result
+            return result
+
+
+class ApexExperimentAssignment:
+    """Represents a unit's assignment in an Apex experiment.
+
+    .. container:: operations
+
+        .. describe:: x == y
+
+            Checks if two experiment assignments are equal.
+
+        .. describe:: x != y
+
+            Checks if two experiment assignments are not equal.
+
+        .. describe:: hash(x)
+
+            Returns the experiment assignment's hash.
+
+    .. versionadded:: 2.2
+
+    Attributes
+    -----------
+    experiment: :class:`ApexExperiment`
+        The experiment this assignment belongs to.
+    unit_id: :class:`int`
+        The ID of the unit (i.e. user, guild, etc.) this assignment applies to.
+    evaluation_id: :class:`str`
+        The evaluation ID of the assignment, used for analytics.
+    variant_id: :class:`int`
+        The assigned variant ID (bucket) for the unit.
+    """
+
+    __slots__ = ('experiment', 'unit_id', 'evaluation_id', 'variant_id', '_flags')
+
+    def __init__(
+        self,
+        experiment: ApexExperiment,
+        unit_id: int,
+        evaluation_id: str,
+        data: ApexExperimentAssignmentPayload,
+    ):
+        self.experiment: ApexExperiment = experiment
+        self.unit_id: int = unit_id
+        self.evaluation_id: str = evaluation_id
+        self.variant_id: int = data[1]
+        self._flags: int = data[2] or 0
+
+    def __repr__(self) -> str:
+        return (
+            f'<ApexExperimentAssignment experiment={self.experiment!r} unit_id={self.unit_id} variant_id={self.variant_id}>'
+        )
+
+    def __hash__(self) -> int:
+        return hash((self.experiment, self.unit_id))
+
+    def __eq__(self, other: object, /) -> bool:
+        if isinstance(other, ApexExperimentAssignment):
+            return self.experiment == other.experiment and self.unit_id == other.unit_id
+        return NotImplemented
+
+    @property
+    def flags(self) -> ApexExperimentFlags:
+        """:class:`ApexExperimentFlags`: The flags for the assignment."""
+        return ApexExperimentFlags._from_value(self._flags)
+
+
+class ApexExperiment:
+    """Represents an Apex experiment.
+
+    Apex experiments are a new experiment system that completely replaces
+    the previous guild and user experiment systems.
+
+    They use "variants" instead of "buckets" or "treatments" and send much more
+    limited data about the experiment, with no public rollout information.
+
+    They also introduce the concept of per-installation experiments, which are experiments
+    that are assigned to a unique client installation ID instead of a user or guild.
+
+    .. container:: operations
+
+        .. describe:: x == y
+
+            Checks if two experiments are equal.
+
+        .. describe:: x != y
+
+            Checks if two experiments are not equal.
+
+        .. describe:: hash(x)
+
+            Returns the experiment's hash.
+
+    .. versionadded:: 2.2
+
+    Attributes
+    -----------
+    unit_type: :class:`ApexExperimentUnitType`
+        The type of unit (i.e. user, guild, installation, etc.) this experiment applies to.
+    hash: :class:`int`
+        The 32-bit unsigned Murmur3 hash of the experiment's name.
+    revision: :class:`int`
+        The current revision of the experiment rollout.
+    tracked_variant_id: Optional[:class:`int`]
+        The variant ID that is currently being tracked.
+    """
+
+    __slots__ = ('_state', '_name', 'unit_type', 'hash', 'revision', 'tracked_variant_id', '_flags', '_assignments')
+
+    def __init__(self, *, state: ConnectionState, data: ApexExperimentAssignmentPayload, unit_type: ApexExperimentUnitType):
+        self._state = state
+        self._name: Optional[str] = None
+        self.unit_type: ApexExperimentUnitType = unit_type
+        self.hash: int = data[0]
+        self.revision: int = data[3]
+        self.tracked_variant_id: Optional[int] = data[4] if len(data) > 4 else None
+        self._flags: int = data[2] or 0  # Some of these are prolly global, but I'm not going to expose for now
+        self._assignments: Dict[int, ApexExperimentAssignment] = {}
+
+    @classmethod
+    def parse(
+        cls, state: ConnectionState, data: Optional[ApexExperimentResponsePayload], /
+    ) -> Tuple[Dict[int, ApexExperiment], Dict[int, List[ApexExperimentAssignment]], Optional[str]]:
+        # Apex experiments are given as a map of unit type -> map of unit ID -> assignments
+        # This is a terrible format, so we're flattening each experiment mention within the assignments to one
+        # ApexExperiment that holds a list of all assignments to it
+
+        if not data:
+            return {}, {}, None
+
+        experiments: Dict[int, ApexExperiment] = {}
+        assignments: Dict[int, List[ApexExperimentAssignment]] = {}
+
+        # Sort unit types in descending order (e.g., Guild -> Installation -> User)
+        # This guarantees Guild experiments are registered with the correct primary unit_type,
+        # preventing them from being erroneously marked as User experiments due to underlying
+        # UseAsEligibility or IsOverride assignment entries
+        sorted_assignments = sorted(data.get('assignments', {}).items(), key=lambda x: int(x[0]), reverse=True)
+
+        for _unit_type, unit_map in sorted_assignments:
+            unit_type = try_enum(ApexExperimentUnitType, int(_unit_type))
+            for _unit_id, assignment_data in unit_map.items():
+                unit_id = int(_unit_id)
+                evaluation_id = assignment_data.get('evaluation_id')
+                for assignment_item in assignment_data.get('assignments', []):
+                    experiment_hash = assignment_item[0]
+                    try:
+                        experiment = experiments[experiment_hash]
+                    except KeyError:
+                        experiment = experiments[experiment_hash] = ApexExperiment(
+                            state=state, data=assignment_item, unit_type=unit_type
+                        )
+
+                    # evaluation_id is treated as nullable by the client, but I don't think it is
+                    assignment = ApexExperimentAssignment(experiment, unit_id, evaluation_id or '', assignment_item)
+                    experiment._assignments[unit_id] = assignment
+                    try:
+                        assignments[unit_id].append(assignment)
+                    except KeyError:
+                        assignments[unit_id] = [assignment]
+
+        return experiments, assignments, data.get('installation')
+
+    def __hash__(self) -> int:
+        return self.hash
+
+    def __eq__(self, other: object, /) -> bool:
+        if isinstance(other, ApexExperiment):
+            return self.hash == other.hash
+        return NotImplemented
+
+    def __repr__(self) -> str:
+        return f'<ApexExperiment unit_type={self.unit_type!r} hash={self.hash}{f" name={self._name!r}" if self._name else ""} revision={self.revision}>'
+
+    @property
+    def name(self) -> Optional[str]:
+        """Optional[:class:`str`]: The unique name of the experiment.
+
+        This data is not available via the API, and must be set manually for using related functions.
+        """
+        return self._name
+
+    @name.setter
+    def name(self, value: Optional[str], /) -> None:
+        if not value:
+            self._name = None
+        elif murmurhash32(value, signed=False) != self.hash:
+            raise ValueError('The name provided does not match the experiment hash')
+        else:
+            self._name = value
+
+    @property
+    def assignments(self) -> Sequence[ApexExperimentAssignment]:
+        """Sequence[:class:`ApexExperimentAssignment`]: The assignments for the experiment."""
+        return SequenceProxy(self._assignments.values())
+
+    def assignment_for(self, unit: Union[Snowflake, Client], /) -> Optional[ApexExperimentAssignment]:
+        """Returns the experiment assignment for a given unit.
+
+        Parameters
+        -----------
+        unit: Union[:class:`~discord.abc.Snowflake`, :class:`~discord.Client`]
+            The unit to get the assignment for.
+            Can be a variety of different objects depending on the unit type.
+            Supports a :class:`~discord.Client` for installation-based experiments.
+
+        Returns
+        -------
+        Optional[:class:`ApexExperimentAssignment`]
+            The experiment assignment for the unit, or None if not assigned.
+        """
+        assignment = self._assignments.get(unit.id)  # type: ignore
+
+        if self.unit_type == ApexExperimentUnitType.guild:
+            user_assignment = self._assignments.get(self._state.self_id)
+
+            # User assignment overrides take priority
+            if user_assignment is not None and user_assignment.flags.override:
+                resolved_assignment = user_assignment
+
+            # Guild assignment overrides skip the eligibility gate
+            elif assignment is not None and assignment.flags.override:
+                resolved_assignment = assignment
+
+            # For regular guild assignments, we need to pass the eligibility gate
+            elif user_assignment is not None and user_assignment.flags.use_as_eligibility and assignment is not None:
+                resolved_assignment = assignment
+
+            # Neither override nor valid eligibility gate was found
+            else:
+                resolved_assignment = None
+
+        else:
+            # User or Installation experiments
+            resolved_assignment = assignment
+
+        # If the finalized assignment has the UseAsEligibility flag, we must ignore the assignment
+        # as it is only meant to be used as an eligibility gate for other assignments
+        if resolved_assignment is not None and resolved_assignment.flags.use_as_eligibility:
+            return None
+
+        return resolved_assignment

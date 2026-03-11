@@ -42,6 +42,7 @@ from .errors import ClientException
 from .colour import Colour
 from .object import Object
 from .flags import MemberFlags
+from .voice_client import VoiceClient
 
 __all__ = (
     'VoiceState',
@@ -56,6 +57,7 @@ if TYPE_CHECKING:
     from .activity import ActivityTypes
     from .asset import Asset
     from .channel import DMChannel, VoiceChannel, StageChannel, GroupChannel
+    from .client import Client
     from .flags import PublicUserFlags
     from .guild import Guild
     from .profile import MemberProfile
@@ -68,16 +70,16 @@ if TYPE_CHECKING:
         UserWithMember as UserWithMemberPayload,
     )
     from .types.gateway import GuildMemberUpdateEvent
-    from .types.user import PartialUser as PartialUserPayload
+    from .types.user import AvatarDecorationData, PartialUser as PartialUserPayload
     from .abc import Snowflake
     from .state import ConnectionState, Presence
     from .message import Message
     from .role import Role
     from .types.voice import BaseVoiceState as VoiceStatePayload
-    from .user import Note
     from .relationship import Relationship
     from .calls import PrivateCall
-    from .enums import PremiumType
+    from .primary_guild import PrimaryGuild
+    from .collectible import Collectible
 
     VocalGuildChannel = Union[VoiceChannel, StageChannel]
     ConnectableChannel = Union[VocalGuildChannel, DMChannel, GroupChannel]
@@ -276,6 +278,8 @@ class Member(discord.abc.Messageable, discord.abc.Connectable, _UserTag):
         '_user',
         '_state',
         '_avatar',
+        '_avatar_decoration_data',
+        '_banner',
         '_flags',
     )
 
@@ -292,7 +296,7 @@ class Member(discord.abc.Messageable, discord.abc.Connectable, _UserTag):
         avatar_decoration: Optional[Asset]
         avatar_decoration_sku_id: Optional[int]
         avatar_decoration_expires_at: Optional[datetime.datetime]
-        note: Note
+        is_pomelo: Callable[[], bool]
         relationship: Optional[Relationship]
         is_friend: Callable[[], bool]
         is_blocked: Callable[[], bool]
@@ -302,12 +306,17 @@ class Member(discord.abc.Messageable, discord.abc.Connectable, _UserTag):
         block: Callable[[], Awaitable[None]]
         unblock: Callable[[], Awaitable[None]]
         remove_friend: Callable[[], Awaitable[None]]
+        send_friend_request: Callable[[], Awaitable[None]]
         fetch_mutual_friends: Callable[[], Awaitable[List[User]]]
+        fetch_note: Callable[[], Awaitable[Optional[str]]]
+        set_note: Callable[[Optional[str]], Awaitable[None]]
+        delete_note: Callable[[], Awaitable[None]]
         public_flags: PublicUserFlags
-        premium_type: Optional[PremiumType]
         banner: Optional[Asset]
         accent_color: Optional[Colour]
         accent_colour: Optional[Colour]
+        primary_guild: PrimaryGuild
+        collectibles: List[Collectible]
 
     def __init__(self, *, data: MemberWithUserPayload, guild: Guild, state: ConnectionState):
         self._state: ConnectionState = state
@@ -320,6 +329,8 @@ class Member(discord.abc.Messageable, discord.abc.Connectable, _UserTag):
         self.nick: Optional[str] = data.get('nick', None)
         self.pending: bool = data.get('pending', False)
         self._avatar: Optional[str] = data.get('avatar')
+        self._avatar_decoration_data: Optional[AvatarDecorationData] = data.get('avatar_decoration_data')
+        self._banner: Optional[str] = data.get('banner')
         self._flags: int = data.get('flags', 0)
         self.timed_out_until: Optional[datetime.datetime] = utils.parse_time(data.get('communication_disabled_until'))
 
@@ -353,8 +364,11 @@ class Member(discord.abc.Messageable, discord.abc.Connectable, _UserTag):
         self._roles = utils.SnowflakeList(map(int, data['roles']))
         self.nick = data.get('nick', None)
         self.pending = data.get('pending', False)
-        self.timed_out_until = utils.parse_time(data.get('communication_disabled_until'))
+        self._avatar = data.get('avatar')
+        self._avatar_decoration_data = data.get('avatar_decoration_data')
+        self._banner = data.get('banner')
         self._flags = data.get('flags', 0)
+        self.timed_out_until = utils.parse_time(data.get('communication_disabled_until'))
 
     @classmethod
     def _try_upgrade(cls, *, data: UserWithMemberPayload, guild: Guild, state: ConnectionState) -> Union[User, Self]:
@@ -382,6 +396,8 @@ class Member(discord.abc.Messageable, discord.abc.Connectable, _UserTag):
         self._flags = member._flags
         self._state = member._state
         self._avatar = member._avatar
+        self._avatar_decoration_data = member._avatar_decoration_data
+        self._banner = member._banner
 
         # Reference will not be copied unless necessary by PRESENCE_UPDATE
         # See below
@@ -394,12 +410,12 @@ class Member(discord.abc.Messageable, discord.abc.Connectable, _UserTag):
         # Some changes are optional
         # If they aren't in the payload then they didn't change
         try:
-            self.nick = data['nick']
+            self.nick = data['nick']  # pyright: ignore[reportTypedDictNotRequiredAccess]
         except KeyError:
             pass
 
         try:
-            self.pending = data['pending']
+            self.pending = data['pending']  # pyright: ignore[reportTypedDictNotRequiredAccess]
         except KeyError:
             pass
 
@@ -407,9 +423,10 @@ class Member(discord.abc.Messageable, discord.abc.Connectable, _UserTag):
         self.timed_out_until = utils.parse_time(data.get('communication_disabled_until'))
         self._roles = utils.SnowflakeList(map(int, data['roles']))
         self._avatar = data.get('avatar')
+        self._banner = data.get('banner')
         self._flags = data.get('flags', 0)
 
-        attrs = {'joined_at', 'premium_since', '_roles', '_avatar', 'timed_out_until', 'nick', 'pending'}
+        attrs = {'joined_at', 'premium_since', '_roles', '_avatar', '_banner', 'timed_out_until', 'nick', 'pending'}
 
         if any(getattr(self, attr) != getattr(old, attr) for attr in attrs):
             return old
@@ -417,7 +434,7 @@ class Member(discord.abc.Messageable, discord.abc.Connectable, _UserTag):
     def _presence_update(
         self, data: BasePresenceUpdate, user: Union[PartialUserPayload, Tuple[()]]
     ) -> Optional[Tuple[User, User]]:
-        self._presence = self._state.create_presence(data)
+        self._presence = self._state.create_presence(data, self._user.id)
         return self._user._update_self(user)
 
     def _get_voice_client_key(self) -> Tuple[int, str]:
@@ -429,6 +446,22 @@ class Member(discord.abc.Messageable, discord.abc.Connectable, _UserTag):
     async def _get_channel(self) -> DMChannel:
         ch = await self.create_dm()
         return ch
+
+    @utils.copy_doc(discord.abc.Connectable.connect)
+    async def connect(
+        self,
+        *,
+        timeout: float = 60.0,
+        reconnect: bool = True,
+        cls: Callable[[Client, discord.abc.VocalChannel], discord.abc.T] = VoiceClient,
+        ring: bool = True,
+    ) -> discord.abc.T:
+        channel = await self._get_channel()
+        ret = await super().connect(timeout=timeout, reconnect=reconnect, cls=cls, _channel=channel)
+
+        if ring:
+            await channel._initial_ring()
+        return ret
 
     @property
     def presence(self) -> Presence:
@@ -462,6 +495,14 @@ class Member(discord.abc.Messageable, discord.abc.Connectable, _UserTag):
     def web_status(self) -> Status:
         """:class:`Status`: The member's status on the web client, if applicable."""
         return try_enum(Status, self.presence.client_status.web or 'offline')
+
+    @property
+    def embedded_status(self) -> Status:
+        """:class:`Status`: The member's status on an embedded client, if applicable.
+
+        .. versionadded:: 2.1
+        """
+        return try_enum(Status, self.presence.client_status.embedded or 'offline')
 
     def is_on_mobile(self) -> bool:
         """:class:`bool`: A helper function that determines if a member is active on a mobile device."""
@@ -508,7 +549,9 @@ class Member(discord.abc.Messageable, discord.abc.Connectable, _UserTag):
             role = g.get_role(role_id)
             if role:
                 result.append(role)
-        result.append(g.default_role)
+        default_role = g.default_role
+        if default_role:
+            result.append(default_role)
         result.sort()
         return result
 
@@ -567,8 +610,87 @@ class Member(discord.abc.Messageable, discord.abc.Connectable, _UserTag):
         return Asset._from_guild_avatar(self._state, self.guild.id, self.id, self._avatar)
 
     @property
+    def display_avatar_decoration(self) -> Optional[Asset]:
+        """Optional[:class:`Asset`]: Returns the member's display avatar decoration.
+
+        If the user has a guild avatar decoration, that is returned.
+        Otherwise, if they have a global avatar decoration, that is returned.
+        If the user has no avatar decoration set, then ``None`` is returned.
+
+        .. versionadded:: 2.1
+        """
+        return self.guild_avatar_decoration or self._user.avatar_decoration
+
+    @property
+    def display_avatar_decoration_sku_id(self) -> Optional[int]:
+        """Optional[:class:`int`]: Returns the member's display avatar decoration's SKU ID.
+
+        If the user has a guild avatar decoration, that is returned.
+        Otherwise, if they have a global avatar decoration, that is returned.
+        If the user has no avatar decoration set, then ``None`` is returned.
+
+        .. versionadded:: 2.1
+        """
+        return self.guild_avatar_decoration_sku_id or self._user.avatar_decoration_sku_id
+
+    @property
+    def guild_avatar_decoration(self) -> Optional[Asset]:
+        """Optional[:class:`Asset`]: Returns an :class:`Asset` for the guild avatar decoration the user has.
+
+        If the user does not have a guild avatar decoration, ``None`` is returned.
+
+        .. versionadded:: 2.1
+        """
+        if self._avatar_decoration_data is not None:
+            return Asset._from_avatar_decoration(self._state, self._avatar_decoration_data['asset'])
+
+    @property
+    def guild_avatar_decoration_sku_id(self) -> Optional[int]:
+        """Optional[:class:`int`]: Returns the guild avatar decoration's SKU ID.
+
+        If the user does not have a guild avatar decoration, ``None`` is returned.
+
+        .. versionadded:: 2.1
+        """
+        if self._avatar_decoration_data:
+            return utils._get_as_snowflake(self._avatar_decoration_data, 'sku_id')
+
+    @property
+    def guild_avatar_decoration_expires_at(self) -> Optional[datetime.datetime]:
+        """Optional[:class:`datetime.datetime`]: Returns the guild avatar decoration's expiration time.
+
+        If the user does not have an expiring guild avatar decoration, ``None`` is returned.
+
+        .. versionadded:: 2.1
+        """
+        if self._avatar_decoration_data:
+            return utils.parse_timestamp(self._avatar_decoration_data.get('expires_at'), ms=False)
+
+    @property
+    def display_banner(self) -> Optional[Asset]:
+        """Optional[:class:`Asset`]: Returns the member's displayed banner, if any.
+
+        This is the member's guild banner if available, otherwise it's their
+        global banner. If the member has no banner set then ``None`` is returned.
+
+        .. versionadded:: 2.1
+        """
+        return self.guild_banner or self._user.banner
+
+    @property
+    def guild_banner(self) -> Optional[Asset]:
+        """Optional[:class:`Asset`]: Returns an :class:`Asset` for the guild banner
+        the member has. If unavailable, ``None`` is returned.
+
+        .. versionadded:: 2.1
+        """
+        if self._banner is None:
+            return None
+        return Asset._from_guild_banner(self._state, self.guild.id, self.id, self._banner)
+
+    @property
     def activities(self) -> Tuple[ActivityTypes, ...]:
-        """Tuple[Union[:class:`BaseActivity`, :class:`Spotify`]]: Returns the activities that
+        """Tuple[:class:`BaseActivity`, ...]: Returns the activities that
         the user is currently doing.
 
         .. note::
@@ -581,7 +703,7 @@ class Member(discord.abc.Messageable, discord.abc.Connectable, _UserTag):
 
     @property
     def activity(self) -> Optional[ActivityTypes]:
-        """Optional[Union[:class:`BaseActivity`, :class:`Spotify`]]: Returns the primary
+        """Optional[:class:`BaseActivity`]: Returns the primary
         activity the user is currently doing. Could be ``None`` if no activity is being done.
 
         .. note::
@@ -596,6 +718,18 @@ class Member(discord.abc.Messageable, discord.abc.Connectable, _UserTag):
         """
         if self.activities:
             return self.activities[0]
+
+    @property
+    def hidden_activities(self) -> Tuple[ActivityTypes, ...]:
+        """Tuple[:class:`BaseActivity`, ...]: Returns the activities that
+        the user is currently doing but has set as hidden.
+
+        Hidden activities are provided when you are participating in a shared activity with
+        a user that is invisible or has set their activity settings to private.
+
+        .. versionadded:: 2.1
+        """
+        return self.presence.hidden_activities
 
     def mentioned_in(self, message: Message) -> bool:
         """Checks if the member is mentioned in the specified message.
@@ -1113,7 +1247,6 @@ class Member(discord.abc.Messageable, discord.abc.Connectable, _UserTag):
         with_mutual_guilds: bool = True,
         with_mutual_friends_count: bool = False,
         with_mutual_friends: bool = True,
-        friend_token: str = MISSING,
     ) -> MemberProfile:
         """|coro|
 
@@ -1156,5 +1289,4 @@ class Member(discord.abc.Messageable, discord.abc.Connectable, _UserTag):
             with_mutual_guilds=with_mutual_guilds,
             with_mutual_friends_count=with_mutual_friends_count,
             with_mutual_friends=with_mutual_friends,
-            friend_token=friend_token,
         )

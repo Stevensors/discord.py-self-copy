@@ -192,7 +192,9 @@ class ProfileMetadata:
 
         self.bio: Optional[str] = data.get('bio') or None
         self.pronouns: Optional[str] = data.get('pronouns') or None
-        self.emoji: Optional[PartialEmoji] = PartialEmoji.from_dict_stateful(data['emoji'], state) if data.get('emoji') else None  # type: ignore
+        self.emoji: Optional[PartialEmoji] = (
+            PartialEmoji.from_dict_stateful(data['emoji'], state) if data.get('emoji') else None  # type: ignore
+        )
         self.popout_animation_particle_type: Optional[int] = utils._get_as_snowflake(data, 'popout_animation_particle_type')
         self._banner: Optional[str] = data.get('banner')
         self._accent_colour: Optional[int] = data.get('accent_color')
@@ -211,6 +213,8 @@ class ProfileMetadata:
         """Optional[:class:`Asset`]: Returns the user's banner asset, if available."""
         if self._banner is None:
             return None
+        if self._guild_id is not None:
+            return Asset._from_guild_banner(self._state, self._guild_id, self._id, self._banner)
         return Asset._from_user_banner(self._state, self._id, self._banner)
 
     @property
@@ -663,7 +667,6 @@ class MemberProfile(Profile, Member):
         'mutual_friends',
         '_mutual_friends_count',
         'application',
-        '_banner',
         'guild_bio',
     )
 
@@ -671,7 +674,6 @@ class MemberProfile(Profile, Member):
         super().__init__(**kwargs)
         data = kwargs['data']
         member = data['guild_member']
-        self._banner: Optional[str] = member.get('banner')
         self.guild_bio: Optional[str] = member.get('bio') or None
 
     def __repr__(self) -> str:
@@ -679,25 +681,6 @@ class MemberProfile(Profile, Member):
             f'<MemberProfile id={self._user.id} name={self._user.name!r} discriminator={self._user.discriminator!r}'
             f' bot={self._user.bot} nick={self.nick!r} premium={self.premium} guild={self.guild!r}>'
         )
-
-    @property
-    def display_banner(self) -> Optional[Asset]:
-        """Optional[:class:`Asset`]: Returns the member's display banner.
-
-        For regular members this is just their banner (if available), but
-        if they have a guild specific banner then that
-        is returned instead.
-        """
-        return self.guild_banner or self._user.banner
-
-    @property
-    def guild_banner(self) -> Optional[Asset]:
-        """Optional[:class:`Asset`]: Returns an :class:`Asset` for the guild banner
-        the member has. If unavailable, ``None`` is returned.
-        """
-        if self._banner is None:
-            return None
-        return Asset._from_guild_banner(self._state, self.guild.id, self.id, self._banner)
 
     @property
     def display_bio(self) -> Optional[str]:

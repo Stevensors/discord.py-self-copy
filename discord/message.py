@@ -76,7 +76,7 @@ from .channel import PartialMessageable
 from .interactions import Interaction
 from .commands import MessageCommand
 from .abc import _handle_commands
-from .application import IntegrationApplication
+from .application import IntegrationApplication, PartialApplication
 from .poll import Poll
 
 if TYPE_CHECKING:
@@ -190,8 +190,7 @@ class Attachment(Hashable):
         to is deleted, then this will 404.
     proxy_url: :class:`str`
         The proxy URL. This is a cached version of the :attr:`~Attachment.url` in the
-        case of images. When the message is deleted, this URL might be valid for a few
-        minutes or not valid at all.
+        case of images.
     content_type: Optional[:class:`str`]
         The attachment's `media type <https://en.wikipedia.org/wiki/Media_type>`_
 
@@ -216,6 +215,18 @@ class Attachment(Hashable):
         The normalised version of the attachment's filename.
 
         .. versionadded:: 2.1
+    clip_created_at: Optional[:class:`datetime.datetime`]
+        When the clip this attachment represents was created.
+
+        .. versionadded:: 2.1
+    clip_participants: List[:class:`User`]
+        The participants in the clip this attachment represents.
+
+        .. versionadded:: 2.1
+    application: Optional[:class:`PartialApplication`]
+        The application of the game this clip was taken from.
+
+        .. versionadded:: 2.1
     """
 
     __slots__ = (
@@ -234,6 +245,9 @@ class Attachment(Hashable):
         'waveform',
         '_flags',
         'title',
+        'clip_created_at',
+        'clip_participants',
+        'application',
     )
 
     def __init__(self, *, data: AttachmentPayload, state: ConnectionState):
@@ -250,6 +264,11 @@ class Attachment(Hashable):
         self.ephemeral: bool = data.get('ephemeral', False)
         self.duration: Optional[float] = data.get('duration_secs')
         self.title: Optional[str] = data.get('title')
+        self.clip_created_at: Optional[datetime.datetime] = utils.parse_time(data.get('clip_created_at'))
+        self.clip_participants: List[User] = [state.create_user(d) for d in data.get('clip_participants', [])]
+        self.application: Optional[PartialApplication] = (
+            PartialApplication(data=data['application'], state=state) if data.get('application') else None  # type: ignore
+        )
 
         waveform = data.get('waveform')
         self.waveform: Optional[bytes] = utils._base64_to_bytes(waveform) if waveform is not None else None
@@ -263,14 +282,12 @@ class Attachment(Hashable):
 
     def is_spoiler(self) -> bool:
         """:class:`bool`: Whether this attachment contains a spoiler."""
-        return self.filename.startswith('SPOILER_')
+        # The flag is technically always present but no harm to check both
+        return self.filename.startswith('SPOILER_') or self.flags.spoiler
 
     def is_voice_message(self) -> bool:
-        """:class:`bool`: Whether this attachment is a voice message.
-
-        .. versionadded:: 2.1
-        """
-        return self.waveform is not None
+        """:class:`bool`: Whether this attachment is a voice message."""
+        return self.duration is not None and self.waveform is not None
 
     def __repr__(self) -> str:
         return f'<Attachment id={self.id} filename={self.filename!r} url={self.url!r}>'
@@ -427,11 +444,11 @@ class Attachment(Hashable):
     def to_dict(self) -> AttachmentPayload:
         result: AttachmentPayload = {
             'filename': self.filename,
+            'flags': self._flags,
             'id': self.id,
             'proxy_url': self.proxy_url,
             'size': self.size,
             'url': self.url,
-            'spoiler': self.is_spoiler(),
         }
         if self.height:
             result['height'] = self.height
@@ -441,6 +458,8 @@ class Attachment(Hashable):
             result['content_type'] = self.content_type
         if self.description is not None:
             result['description'] = self.description
+        if self.title is not None:
+            result['title'] = self.title
         return result
 
 
@@ -460,7 +479,7 @@ class DeletedReferencedMessage:
         self._parent: MessageReference = parent
 
     def __repr__(self) -> str:
-        return f"<DeletedReferencedMessage id={self.id} channel_id={self.channel_id} guild_id={self.guild_id!r}>"
+        return f'<DeletedReferencedMessage id={self.id} channel_id={self.channel_id} guild_id={self.guild_id!r}>'
 
     @property
     def id(self) -> int:
@@ -516,7 +535,7 @@ class MessageSnapshot(Hashable):
         Extra features of the the message snapshot.
     stickers: List[:class:`StickerItem`]
         A list of sticker items given to the message.
-    components: List[Union[:class:`ActionRow`, :class:`Button`, :class:`SelectMenu`]]
+    components: List[:class:`Component`]]
         A list of components in the message.
     """
 
@@ -632,6 +651,11 @@ class MessageReference:
         .. versionadded:: 2.1
     message_id: Optional[:class:`int`]
         The id of the message referenced.
+        This can be ``None`` when this message reference was retrieved from
+        a system message of one of the following types:
+
+        - :attr:`MessageType.channel_follow_add`
+        - :attr:`MessageType.thread_created`
     channel_id: :class:`int`
         The channel id of the message referenced.
     guild_id: Optional[:class:`int`]
@@ -1041,8 +1065,7 @@ class PartialMessage(Hashable):
         attachments: Sequence[Union[Attachment, _FileBase]] = ...,
         delete_after: Optional[float] = ...,
         allowed_mentions: Optional[AllowedMentions] = ...,
-    ) -> Message:
-        ...
+    ) -> Message: ...
 
     @overload
     async def edit(
@@ -1052,8 +1075,7 @@ class PartialMessage(Hashable):
         attachments: Sequence[Union[Attachment, _FileBase]] = ...,
         delete_after: Optional[float] = ...,
         allowed_mentions: Optional[AllowedMentions] = ...,
-    ) -> Message:
-        ...
+    ) -> Message: ...
 
     async def edit(
         self,
@@ -1521,8 +1543,7 @@ class PartialMessage(Hashable):
         suppress_embeds: bool = ...,
         silent: bool = ...,
         poll: Poll = ...,
-    ) -> Message:
-        ...
+    ) -> Message: ...
 
     @overload
     async def reply(
@@ -1539,8 +1560,7 @@ class PartialMessage(Hashable):
         suppress_embeds: bool = ...,
         silent: bool = ...,
         poll: Poll = ...,
-    ) -> Message:
-        ...
+    ) -> Message: ...
 
     @overload
     async def reply(
@@ -1557,8 +1577,7 @@ class PartialMessage(Hashable):
         suppress_embeds: bool = ...,
         silent: bool = ...,
         poll: Poll = ...,
-    ) -> Message:
-        ...
+    ) -> Message: ...
 
     @overload
     async def reply(
@@ -1575,8 +1594,7 @@ class PartialMessage(Hashable):
         suppress_embeds: bool = ...,
         silent: bool = ...,
         poll: Poll = ...,
-    ) -> Message:
-        ...
+    ) -> Message: ...
 
     async def reply(self, content: Optional[str] = None, **kwargs: Any) -> Message:
         """|coro|
@@ -1615,12 +1633,10 @@ class PartialMessage(Hashable):
         *,
         allowed_mentions: AllowedMentions = ...,
         mention_author: bool = ...,
-    ) -> Message:
-        ...
+    ) -> Message: ...
 
     @overload
-    async def greet(self, sticker: Union[GuildSticker, StickerItem]) -> Message:
-        ...
+    async def greet(self, sticker: Union[GuildSticker, StickerItem]) -> Message: ...
 
     async def greet(self, sticker: Union[GuildSticker, StickerItem], **kwargs: Any) -> Message:
         """|coro|
@@ -1791,9 +1807,16 @@ class Message(PartialMessage, Hashable):
         The call that the message refers to. This is only applicable to messages of type
         :attr:`MessageType.call`.
     reference: Optional[:class:`~discord.MessageReference`]
-        The message that this message references. This is only applicable to messages of
-        type :attr:`MessageType.pins_add`, crossposted messages created by a
-        followed channel integration, or message replies.
+        The message that this message references. This is only applicable to
+        message replies (:attr:`MessageType.reply`), crossposted messages created by
+        a followed channel integration, forwarded messages, and messages of type:
+
+        - :attr:`MessageType.pins_add`
+        - :attr:`MessageType.channel_follow_add`
+        - :attr:`MessageType.thread_created`
+        - :attr:`MessageType.thread_starter_message`
+        - :attr:`MessageType.poll_result`
+        - :attr:`MessageType.context_menu_command`
 
         .. versionadded:: 1.5
 
@@ -1855,7 +1878,7 @@ class Message(PartialMessage, Hashable):
         A list of sticker items given to the message.
 
         .. versionadded:: 1.6
-    components: List[Union[:class:`ActionRow`, :class:`Button`, :class:`SelectMenu`]]
+    components: List[:class:`Component`]
         A list of components in the message.
 
         .. versionadded:: 2.0
@@ -1956,6 +1979,7 @@ class Message(PartialMessage, Hashable):
         'total_results',
         'analytics_id',
         'doing_deep_historical_index',
+        '_pinned_at',
     )
 
     if TYPE_CHECKING:
@@ -1980,15 +2004,15 @@ class Message(PartialMessage, Hashable):
         self._state: ConnectionState = state
         self.webhook_id: Optional[int] = utils._get_as_snowflake(data, 'webhook_id')
         self.reactions: List[Reaction] = [Reaction(message=self, data=d) for d in data.get('reactions', [])]
-        self.attachments: List[Attachment] = [Attachment(data=a, state=self._state) for a in data['attachments']]
-        self.embeds: List[Embed] = [Embed.from_dict(a) for a in data['embeds']]
+        self.attachments: List[Attachment] = [Attachment(data=a, state=self._state) for a in data.get('attachments', [])]
+        self.embeds: List[Embed] = [Embed.from_dict(a) for a in data.get('embeds', [])]
         self.activity: Optional[MessageActivityPayload] = data.get('activity')
-        self._edited_timestamp: Optional[datetime.datetime] = utils.parse_time(data['edited_timestamp'])
+        self._edited_timestamp: Optional[datetime.datetime] = utils.parse_time(data.get('edited_timestamp'))
         self.type: MessageType = try_enum(MessageType, data['type'])
-        self.pinned: bool = data['pinned']
+        self.pinned: bool = data.get('pinned', False)
         self.flags: MessageFlags = MessageFlags._from_value(data.get('flags', 0))
-        self.mention_everyone: bool = data['mention_everyone']
-        self.tts: bool = data['tts']
+        self.mention_everyone: bool = data.get('mention_everyone', False)
+        self.tts: bool = data.get('tts', False)
         self.content: str = data['content']
         self.nonce: Optional[Union[int, str]] = data.get('nonce')
         self.position: Optional[int] = data.get('position')
@@ -1996,10 +2020,13 @@ class Message(PartialMessage, Hashable):
         self.stickers: List[StickerItem] = [StickerItem(data=d, state=state) for d in data.get('sticker_items', [])]
         self.call: Optional[CallMessage] = None
         self.interaction: Optional[Interaction] = None
+        # Set by Messageable.pins
+        self._pinned_at: Optional[datetime.datetime] = None
 
         self.poll: Optional[Poll] = None
         try:
-            self.poll = Poll._from_data(data=data['poll'], message=self, state=state)
+            poll = data['poll']  # pyright: ignore[reportTypedDictNotRequiredAccess]
+            self.poll = Poll._from_data(data=poll, message=self, state=state)
         except KeyError:
             pass
 
@@ -2020,7 +2047,7 @@ class Message(PartialMessage, Hashable):
 
         if self.guild is not None:
             try:
-                thread = data['thread']
+                thread = data['thread']  # pyright: ignore[reportTypedDictNotRequiredAccess]
             except KeyError:
                 pass
             else:
@@ -2033,20 +2060,20 @@ class Message(PartialMessage, Hashable):
 
         self.application: Optional[IntegrationApplication] = None
         try:
-            application = data['application']
+            application = data['application']  # pyright: ignore[reportTypedDictNotRequiredAccess]
         except KeyError:
             pass
         else:
             self.application = IntegrationApplication(state=self._state, data=application)
 
         try:
-            ref = data['message_reference']
+            ref = data['message_reference']  # pyright: ignore[reportTypedDictNotRequiredAccess]
         except KeyError:
             self.reference = None
         else:
             self.reference = ref = MessageReference.with_state(state, ref)
             try:
-                resolved = data['referenced_message']
+                resolved = data['referenced_message']  # pyright: ignore[reportTypedDictNotRequiredAccess]
             except KeyError:
                 pass
             else:
@@ -2071,11 +2098,15 @@ class Message(PartialMessage, Hashable):
                     if self.reference.message_id:
                         self._state._update_poll_results(self, self.reference.message_id)
 
-        self.message_snapshots: List[MessageSnapshot] = MessageSnapshot._from_value(state, data.get('message_snapshots'), self.reference)  # type: ignore
+        self.message_snapshots: List[MessageSnapshot] = MessageSnapshot._from_value(
+            state,
+            data.get('message_snapshots'),
+            self.reference,  # type: ignore
+        )
 
         self.role_subscription: Optional[RoleSubscriptionInfo] = None
         try:
-            role_subscription = data['role_subscription_data']
+            role_subscription = data['role_subscription_data']  # pyright: ignore[reportTypedDictNotRequiredAccess]
         except KeyError:
             pass
         else:
@@ -2083,7 +2114,7 @@ class Message(PartialMessage, Hashable):
 
         self.purchase_notification: Optional[PurchaseNotification] = None
         try:
-            purchase_notification = data['purchase_notification']
+            purchase_notification = data['purchase_notification']  # pyright: ignore[reportTypedDictNotRequiredAccess]
         except KeyError:
             pass
         else:
@@ -2097,7 +2128,7 @@ class Message(PartialMessage, Hashable):
 
         for handler in ('author', 'member', 'mentions', 'mention_roles', 'call', 'interaction', 'components'):
             try:
-                getattr(self, f'_handle_{handler}')(data[handler])
+                getattr(self, f'_handle_{handler}')(data[handler])  # type: ignore
             except KeyError:
                 continue
 
@@ -2310,7 +2341,11 @@ class Message(PartialMessage, Hashable):
         channel = self.channel
         settings = guild.notification_settings if guild else state.client.notification_settings
 
-        if channel.type in (ChannelType.private, ChannelType.group) and not settings.muted and not channel.notification_settings.muted:  # type: ignore
+        if (
+            channel.type in (ChannelType.private, ChannelType.group)
+            and not settings.muted
+            and not (getattr(channel, 'notification_settings', None) and channel.notification_settings.muted)  # type: ignore
+        ):
             return True
         if state.user in self.mentions:
             return True
@@ -2436,6 +2471,18 @@ class Message(PartialMessage, Hashable):
             # Fall back to guild threads in case one was created after the message
             return self._thread or self.guild.get_thread(self.id)
 
+    @property
+    def pinned_at(self) -> Optional[datetime.datetime]:
+        """Optional[:class:`datetime.datetime`]: An aware UTC datetime object containing the time
+        when the message was pinned.
+
+        .. note::
+            This is only set for messages that are returned by :meth:`abc.Messageable.pins`.
+
+        .. versionadded:: 2.1
+        """
+        return self._pinned_at
+
     def is_system(self) -> bool:
         """:class:`bool`: Whether the message is a system message.
 
@@ -2496,19 +2543,19 @@ class Message(PartialMessage, Hashable):
 
         if self.type is MessageType.new_member:
             formats = [
-                "{0} joined the party.",
-                "{0} is here.",
-                "Welcome, {0}. We hope you brought pizza.",
-                "A wild {0} appeared.",
-                "{0} just landed.",
-                "{0} just slid into the server.",
-                "{0} just showed up!",
-                "Welcome {0}. Say hi!",
-                "{0} hopped into the server.",
-                "Everyone welcome {0}!",
+                '{0} joined the party.',
+                '{0} is here.',
+                'Welcome, {0}. We hope you brought pizza.',
+                'A wild {0} appeared.',
+                '{0} just landed.',
+                '{0} just slid into the server.',
+                '{0} just showed up!',
+                'Welcome {0}. Say hi!',
+                '{0} hopped into the server.',
+                'Everyone welcome {0}!',
                 "Glad you're here, {0}.",
-                "Good to see you, {0}.",
-                "Yay you made it, {0}!",
+                'Good to see you, {0}.',
+                'Yay you made it, {0}!',
             ]
 
             created_at_ms = int(self.created_at.timestamp() * 1000)
@@ -2570,7 +2617,7 @@ class Message(PartialMessage, Hashable):
 
         if self.type is MessageType.thread_starter_message:
             if self.reference is None or self.reference.resolved is None:
-                return 'Sorry, we couldn\'t load the first message in this thread'
+                return "Sorry, we couldn't load the first message in this thread"
 
             # The resolved message for the reference will be a Message
             return self.reference.resolved.content  # type: ignore
@@ -2627,7 +2674,10 @@ class Message(PartialMessage, Hashable):
                 embed.fields,
                 name='poll_question_text',
             )
-            return f'{self.author.display_name}\'s poll {poll_title.value} has closed.'  # type: ignore
+            return f"{self.author.display_name}'s poll {poll_title.value} has closed."  # type: ignore
+
+        if self.type is MessageType.emoji_added:
+            return f'{self.author.name} added a new emoji, {self.content}'
 
         # Fallback for unknown message types
         return self.content
@@ -2641,8 +2691,7 @@ class Message(PartialMessage, Hashable):
         suppress: bool = ...,
         delete_after: Optional[float] = ...,
         allowed_mentions: Optional[AllowedMentions] = ...,
-    ) -> Message:
-        ...
+    ) -> Message: ...
 
     @overload
     async def edit(
@@ -2653,8 +2702,7 @@ class Message(PartialMessage, Hashable):
         suppress: bool = ...,
         delete_after: Optional[float] = ...,
         allowed_mentions: Optional[AllowedMentions] = ...,
-    ) -> Message:
-        ...
+    ) -> Message: ...
 
     async def edit(
         self,
@@ -2807,7 +2855,7 @@ class Message(PartialMessage, Hashable):
         """
         return await self.edit(attachments=[a for a in self.attachments if a not in attachments])
 
-    @utils.deprecated("Message.channel.application_commands")
+    @utils.deprecated('Message.channel.application_commands')
     def message_commands(
         self,
         query: Optional[str] = None,

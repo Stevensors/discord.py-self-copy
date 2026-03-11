@@ -42,7 +42,9 @@ from .scheduled_event import ScheduledEvent
 from .stage_instance import StageInstance
 from .sticker import GuildSticker
 from .threads import Thread
+from .integrations import Integration
 from .channel import ForumChannel, StageChannel, ForumTag
+from .onboarding import OnboardingPrompt, OnboardingPromptOption
 
 __all__ = (
     'AuditLogDiff',
@@ -68,9 +70,11 @@ if TYPE_CHECKING:
         DefaultReaction as DefaultReactionPayload,
     )
     from .types.invite import Invite as InvitePayload
-    from .types.role import Role as RolePayload
+    from .types.role import Role as RolePayload, RoleColours
     from .types.snowflake import Snowflake
     from .types.automod import AutoModerationAction
+    from .types.integration import IntegrationType
+    from .types.onboarding import Prompt as PromptPayload, PromptOption as PromptOptionPayload
     from .user import User
     from .webhook import Webhook
 
@@ -86,6 +90,7 @@ if TYPE_CHECKING:
         GuildSticker,
         Thread,
         Object,
+        Integration,
         AutoModRule,
         ScheduledEvent,
         Webhook,
@@ -140,8 +145,8 @@ def _transform_applied_forum_tags(entry: AuditLogEntry, data: List[Snowflake]) -
     return [Object(id=tag_id, type=ForumTag) for tag_id in data]
 
 
-def _transform_overloaded_flags(entry: AuditLogEntry, data: int) -> Union[int, flags.ChannelFlags]:
-    # The `flags` key is definitely overloaded. Right now it's for channels and threads but
+def _transform_overloaded_flags(entry: AuditLogEntry, data: int) -> Union[int, flags.ChannelFlags, flags.InviteFlags]:
+    # The `flags` key is definitely overloaded. Right now it's for channels, threads and invites but
     # I am aware of `member.flags` and `user.flags` existing. However, this does not impact audit logs
     # at the moment but better safe than sorry.
     channel_audit_log_types = (
@@ -152,9 +157,16 @@ def _transform_overloaded_flags(entry: AuditLogEntry, data: int) -> Union[int, f
         enums.AuditLogAction.thread_update,
         enums.AuditLogAction.thread_delete,
     )
+    invite_audit_log_types = (
+        enums.AuditLogAction.invite_create,
+        enums.AuditLogAction.invite_update,
+        enums.AuditLogAction.invite_delete,
+    )
 
     if entry.action in channel_audit_log_types:
         return flags.ChannelFlags._from_value(data)
+    elif entry.action in invite_audit_log_types:
+        return flags.InviteFlags._from_value(data)
     return data
 
 
@@ -230,6 +242,20 @@ def _transform_automod_actions(entry: AuditLogEntry, data: List[AutoModerationAc
     return [AutoModRuleAction.from_data(action) for action in data]
 
 
+def _transform_default_emoji(entry: AuditLogEntry, data: str) -> PartialEmoji:
+    return PartialEmoji(name=data)
+
+
+def _transform_onboarding_prompts(entry: AuditLogEntry, data: List[PromptPayload]) -> List[OnboardingPrompt]:
+    return [OnboardingPrompt.from_dict(data=prompt, state=entry._state, guild=entry.guild) for prompt in data]
+
+
+def _transform_onboarding_prompt_options(
+    entry: AuditLogEntry, data: List[PromptOptionPayload]
+) -> List[OnboardingPromptOption]:
+    return [OnboardingPromptOption.from_dict(data=option, state=entry._state, guild=entry.guild) for option in data]
+
+
 E = TypeVar('E', bound=enums.Enum)
 
 
@@ -252,13 +278,15 @@ def _flag_transformer(cls: Type[F]) -> Callable[[AuditLogEntry, Union[int, str]]
 
 def _transform_type(
     entry: AuditLogEntry, data: Union[int, str]
-) -> Union[enums.ChannelType, enums.StickerType, enums.WebhookType, str]:
+) -> Union[enums.ChannelType, enums.StickerType, enums.WebhookType, str, enums.OnboardingPromptType]:
     if entry.action.name.startswith('sticker_'):
         return enums.try_enum(enums.StickerType, data)
     elif entry.action.name.startswith('integration_'):
         return data  # type: ignore  # integration type is str
     elif entry.action.name.startswith('webhook_'):
         return enums.try_enum(enums.WebhookType, data)
+    elif entry.action.name.startswith('onboarding_prompt_'):
+        return enums.try_enum(enums.OnboardingPromptType, data)
     else:
         return enums.try_enum(enums.ChannelType, data)
 
@@ -276,14 +304,12 @@ class AuditLogDiff:
 
     if TYPE_CHECKING:
 
-        def __getattr__(self, item: str) -> Any:
-            ...
+        def __getattr__(self, item: str) -> Any: ...
 
-        def __setattr__(self, key: str, value: Any) -> Any:
-            ...
+        def __setattr__(self, key: str, value: Any) -> Any: ...
 
 
-Transformer = Callable[["AuditLogEntry", Any], Any]
+Transformer = Callable[['AuditLogEntry', Any], Any]
 
 
 class AuditLogChanges:
@@ -336,6 +362,12 @@ class AuditLogChanges:
         'available_tags':                        (None, _transform_forum_tags),
         'flags':                                 (None, _transform_overloaded_flags),
         'default_reaction_emoji':                (None, _transform_default_reaction),
+        'emoji_name':                            ('emoji', _transform_default_emoji),
+        'user_id':                               ('user', _transform_member_id),
+        'options':                               (None, _transform_onboarding_prompt_options),
+        'prompts':                               (None, _transform_onboarding_prompts),
+        'default_channel_ids':                   ('default_channels', _transform_channels_or_threads),
+        'mode':                                  (None, _enum_transformer(enums.OnboardingMode)),
     }
     # fmt: on
 
@@ -367,6 +399,12 @@ class AuditLogChanges:
                     self._handle_trigger_attr_update(self.before, self.after, entry, trigger_attr, elem['new_value'])  # type: ignore
                 elif action == '$remove':
                     self._handle_trigger_attr_update(self.after, self.before, entry, trigger_attr, elem['new_value'])  # type: ignore
+                continue
+
+            # special case for colors to set secondary and tertiary colos/colour attributes
+            if attr == 'colors':
+                self._handle_colours(self.before, elem.get('old_value'))  # type: ignore  # should be a RoleColours dict
+                self._handle_colours(self.after, elem.get('new_value'))  # type: ignore  # should be a RoleColours dict
                 continue
 
             try:
@@ -485,6 +523,21 @@ class AuditLogChanges:
         except (AttributeError, TypeError):
             pass
 
+    def _handle_colours(self, diff: AuditLogDiff, colours: Optional[RoleColours]):
+        if colours is not None:
+            # handle colours to multiple colour attributes
+            colour = Colour(colours['primary_color'])
+            secondary_colour = colours['secondary_color']
+            tertiary_colour = colours['tertiary_color']
+        else:
+            colour = None
+            secondary_colour = None
+            tertiary_colour = None
+
+        diff.color = diff.colour = colour
+        diff.secondary_color = diff.secondary_colour = Colour(secondary_colour) if secondary_colour is not None else None
+        diff.tertiary_color = diff.tertiary_colour = Colour(tertiary_colour) if tertiary_colour is not None else None
+
     def _create_trigger(self, diff: AuditLogDiff, entry: AuditLogEntry) -> AutoModTrigger:
         # check if trigger has already been created
         if not hasattr(diff, 'trigger'):
@@ -537,6 +590,10 @@ class _AuditLogProxyAutoModAction(_AuditLogProxy):
     automod_rule_name: str
     automod_rule_trigger_type: str
     channel: Optional[Union[abc.GuildChannel, Thread]]
+
+
+class _AuditLogProxyMemberKickOrMemberRoleUpdate(_AuditLogProxy):
+    integration_type: Optional[IntegrationType]
 
 
 class AuditLogEntry(Hashable):
@@ -592,6 +649,7 @@ class AuditLogEntry(Hashable):
         self,
         *,
         users: Mapping[int, User],
+        integrations: Mapping[int, Integration],
         automod_rules: Mapping[int, AutoModRule],
         webhooks: Mapping[int, Webhook],
         data: AuditLogEntryPayload,
@@ -600,6 +658,7 @@ class AuditLogEntry(Hashable):
         self._state: ConnectionState = guild._state
         self.guild: Guild = guild
         self._users: Mapping[int, User] = users
+        self._integrations: Mapping[int, Integration] = integrations
         self._automod_rules: Mapping[int, AutoModRule] = automod_rules
         self._webhooks: Mapping[int, Webhook] = webhooks
         self._from_data(data)
@@ -621,7 +680,8 @@ class AuditLogEntry(Hashable):
             _AuditLogProxyStageInstanceAction,
             _AuditLogProxyMessageBulkDelete,
             _AuditLogProxyAutoModAction,
-            Member, User, None,
+            _AuditLogProxyMemberKickOrMemberRoleUpdate,
+            Member, User, None, Integration,
             Role, Object
         ] = None
         # fmt: on
@@ -645,6 +705,10 @@ class AuditLogEntry(Hashable):
             elif self.action is enums.AuditLogAction.message_bulk_delete:
                 # The bulk message delete action has the number of messages deleted
                 self.extra = _AuditLogProxyMessageBulkDelete(count=int(extra['count']))
+            elif self.action in (enums.AuditLogAction.kick, enums.AuditLogAction.member_role_update):
+                # The member kick action has a dict with some information
+                integration_type = extra.get('integration_type')
+                self.extra = _AuditLogProxyMemberKickOrMemberRoleUpdate(integration_type=integration_type)
             elif self.action.name.endswith('pin'):
                 # the pin actions have a dict with some information
                 channel_id = int(extra['channel_id'])
@@ -656,6 +720,7 @@ class AuditLogEntry(Hashable):
                 self.action is enums.AuditLogAction.automod_block_message
                 or self.action is enums.AuditLogAction.automod_flag_message
                 or self.action is enums.AuditLogAction.automod_timeout_member
+                or self.action is enums.AuditLogAction.automod_quarantine_user
             ):
                 channel_id = utils._get_as_snowflake(extra, 'channel_id')
                 channel = None
@@ -667,7 +732,7 @@ class AuditLogEntry(Hashable):
                 self.extra = _AuditLogProxyAutoModAction(
                     automod_rule_name=extra['auto_moderation_rule_name'],
                     automod_rule_trigger_type=enums.try_enum(
-                        enums.AutoModRuleTriggerType, extra['auto_moderation_rule_trigger_type']
+                        enums.AutoModRuleTriggerType, int(extra['auto_moderation_rule_trigger_type'])
                     ),
                     channel=channel,
                 )
@@ -706,6 +771,19 @@ class AuditLogEntry(Hashable):
             return None
 
         return self.guild.get_member(user_id) or self._users.get(user_id)
+
+    def _get_integration(self, integration_id: Optional[int]) -> Optional[Integration]:
+        if integration_id is None:
+            return None
+
+        return self._integrations.get(integration_id)
+
+    def _get_integration_by_app_id(self, application_id: Optional[int]) -> Optional[Integration]:
+        if application_id is None:
+            return None
+
+        # get PartialIntegration by application id
+        return utils.get(self._integrations.values(), application_id=application_id)
 
     def __repr__(self) -> str:
         return f'<AuditLogEntry id={self.id} action={self.action} user={self.user!r}>'
@@ -779,6 +857,7 @@ class AuditLogEntry(Hashable):
             'code': changeset.code,
             'temporary': changeset.temporary,
             'uses': changeset.uses,
+            'flags': changeset.flags.value,
             'channel': None,  # type: ignore # the channel is passed to the Invite constructor directly
         }
 
@@ -792,7 +871,13 @@ class AuditLogEntry(Hashable):
     def _convert_target_emoji(self, target_id: int) -> Union[Emoji, Object]:
         return self._state.get_emoji(target_id) or Object(id=target_id, type=Emoji)
 
-    def _convert_target_message(self, target_id: int) -> Union[Member, User, Object]:
+    def _convert_target_message(self, target_id: Optional[int]) -> Optional[Union[Member, User, Object]]:
+        # The message_pin and message_unpin action types do not have a
+        # non-null target_id so safeguard against that
+
+        if target_id is None:
+            return None
+
         return self._get_member(target_id) or Object(id=target_id, type=Member)
 
     def _convert_target_stage_instance(self, target_id: int) -> Union[StageInstance, Object]:
@@ -807,6 +892,9 @@ class AuditLogEntry(Hashable):
     def _convert_target_guild_scheduled_event(self, target_id: int) -> Union[ScheduledEvent, Object]:
         return self.guild.get_scheduled_event(target_id) or Object(id=target_id, type=ScheduledEvent)
 
+    def _convert_target_integration(self, target_id: int) -> Union[Integration, Object]:
+        return self._get_integration(target_id) or Object(target_id, type=Integration)
+
     def _convert_target_auto_moderation(self, target_id: int) -> Union[AutoModRule, Object]:
         return self._automod_rules.get(target_id) or Object(target_id, type=AutoModRule)
 
@@ -814,3 +902,6 @@ class AuditLogEntry(Hashable):
         from .webhook import Webhook  # Circular import
 
         return self._webhooks.get(target_id) or Object(target_id, type=Webhook)
+
+    def _convert_target_onboarding_prompt(self, target_id: int) -> Object:
+        return Object(target_id, type=OnboardingPrompt)

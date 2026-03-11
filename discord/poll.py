@@ -225,7 +225,7 @@ class PollAnswer:
         """:class:`bool`: Whether the answer is the one that had the most
         votes when the poll ended.
 
-        .. versionadded:: 2.5
+        .. versionadded:: 2.1
 
         .. note::
 
@@ -336,6 +336,15 @@ class Poll:
         Defaults to ``False``.
     layout_type: :class:`PollLayoutType`
         The layout type of the poll. Defaults to :attr:`PollLayoutType.default`.
+
+    Attributes
+    -----------
+    duration: :class:`datetime.timedelta`
+        The duration of the poll.
+    multiple: :class:`bool`
+        Whether users are allowed to select more than one answer.
+    layout_type: :class:`PollLayoutType`
+        The layout type of the poll.
     """
 
     __slots__ = (
@@ -474,7 +483,7 @@ class Poll:
         return data
 
     def __repr__(self) -> str:
-        return f"<Poll duration={self.duration} question=\"{self.question}\" answers={self.answers}>"
+        return f'<Poll duration={self.duration} question="{self.question}" answers={self.answers}>'
 
     @property
     def question(self) -> str:
@@ -490,7 +499,7 @@ class Poll:
     def victor_answer_id(self) -> Optional[int]:
         """Optional[:class:`int`]: The victor answer ID.
 
-        .. versionadded:: 2.5
+        .. versionadded:: 2.1
 
         .. note::
 
@@ -502,7 +511,7 @@ class Poll:
     def victor_answer(self) -> Optional[PollAnswer]:
         """Optional[:class:`PollAnswer`]: The victor answer.
 
-        .. versionadded:: 2.5
+        .. versionadded:: 2.1
 
         .. note::
 
@@ -546,7 +555,7 @@ class Poll:
 
         If the poll has not yet finished, this is an approximate vote count.
 
-        .. versionchanged:: 2.5
+        .. versionchanged:: 2.1
             This now returns an exact vote count when updated from its poll results message.
         """
         if self._total_votes is not None:

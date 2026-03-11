@@ -80,8 +80,8 @@ class ReadState:
     type: :class:`ReadStateType`
         The type of the read state.
     last_acked_id: :class:`int`
-        The ID of the last acknowledged resource (e.g. message) in the read state.
-        It may *not* point to an existing or valid resource.
+        The ID of the last acknowledged entity (e.g. message) in the read state.
+        It may *not* point to an existing or valid entity.
     acked_pin_timestamp: Optional[:class:`datetime.datetime`]
         When the channel's pins were last acknowledged.
     badge_count: :class:`int`
@@ -172,7 +172,7 @@ class ReadState:
             return state._get_or_create_partial_messageable(self.id)  # type: ignore
         elif self.type in (ReadStateType.scheduled_events, ReadStateType.guild_home, ReadStateType.onboarding):
             return state._get_or_create_unavailable_guild(self.id)
-        elif self.type == ReadStateType.notification_center and self.id == state.self_id:
+        elif self.type in (ReadStateType.notification_center, ReadStateType.message_requests) and self.id == state.self_id:
             return state.user  # type: ignore
         else:
             raise NotImplementedError(f'Unknown read state type {self.type!r}')

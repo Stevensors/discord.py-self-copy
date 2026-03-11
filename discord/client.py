@@ -25,8 +25,9 @@ DEALINGS IN THE SOFTWARE.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
 import logging
+import uuid
+from datetime import datetime
 from typing import (
     Any,
     AsyncIterator,
@@ -38,6 +39,8 @@ from typing import (
     Generator,
     List,
     Literal,
+    Mapping,
+    NamedTuple,
     Optional,
     overload,
     Sequence,
@@ -45,24 +48,35 @@ from typing import (
     Tuple,
     Type,
     TypeVar,
+    TypedDict,
     Union,
 )
 
 import aiohttp
+from curl_cffi import CurlError
 
-from .user import _UserTag, User, ClientUser, Note
+from .user import _UserTag, RecentAvatar, User, ClientUser
 from .invite import Invite
 from .template import Template
 from .widget import Widget
 from .guild import UserGuild
 from .emoji import Emoji
 from .channel import _private_channel_factory, _threaded_channel_factory, GroupChannel, PartialMessageable
-from .enums import ActivityType, ChannelType, ClientType, ConnectionType, EntitlementType, Status
+from .enums import (
+    ActivityType,
+    ApexExperimentSurface,
+    ChannelType,
+    ClientType,
+    ConnectionType,
+    EntitlementType,
+    ExperimentPlatform,
+    RelationshipType,
+    Status,
+    try_enum,
+)
 from .mentions import AllowedMentions
 from .errors import *
-from .enums import RelationshipType, Status
 from .gateway import *
-from .gateway import ConnectionClosed
 from .activity import ActivityTypes, BaseActivity, Session, Spotify, create_activity
 from .voice_client import VoiceClient
 from .http import HTTPClient
@@ -99,14 +113,16 @@ from .relationship import FriendSuggestion, Relationship
 from .settings import UserSettings, LegacyUserSettings, TrackingSettings, EmailSettings
 from .affinity import *
 from .oauth2 import OAuth2Authorization, OAuth2Token
-from .experiment import UserExperiment, GuildExperiment
+from .experiment import ApexExperiment, UserExperiment, GuildExperiment
 
 if TYPE_CHECKING:
-    from typing_extensions import Self
     from types import TracebackType
-    from .guild import GuildChannel
+
+    from typing_extensions import Self, Unpack
+
     from .abc import Snowflake, SnowflakeTime
-    from .channel import DMChannel
+    from .channel import DMChannel, GroupChannel
+    from .guild import GuildChannel
     from .message import Message
     from .member import Member
     from .voice_client import VoiceProtocol
@@ -119,7 +135,38 @@ if TYPE_CHECKING:
     from .tutorial import Tutorial
     from .file import File
     from .guild import Guild
+    from .types.read_state import BulkReadState
     from .types.snowflake import Snowflake as _Snowflake
+    from .flags import MemberCacheFlags
+    from .errors import CaptchaRequired
+
+    class _ClientOptions(TypedDict, total=False):
+        max_messages: Optional[int]
+        proxy: Optional[str]
+        proxy_auth: Optional[aiohttp.BasicAuth]
+        member_cache_flags: Optional[MemberCacheFlags]
+        chunk_guilds_at_startup: bool
+        guild_subscriptions: bool
+        status: Optional[Status]
+        activity: Optional[BaseActivity]
+        activities: Optional[List[BaseActivity]]
+        afk: bool
+        idle_since: Optional[datetime]
+        allowed_mentions: Optional[AllowedMentions]
+        heartbeat_timeout: Optional[float]
+        assume_unsync_clock: bool
+        enable_debug_events: bool
+        sync_presence: bool
+        captcha_handler: Optional[Callable[[CaptchaRequired, Client], Awaitable[str]]]
+        max_ratelimit_timeout: Optional[float]
+        default_ratelimit_limit: Optional[int]
+        preferred_rtc_regions: Optional[List[str]]
+        canary: bool
+        apm_tracing: bool
+        rpc_proxy: Optional[str]
+        proxy_gateway: bool
+        timezone: Optional[str]
+        installation_id: Optional[str]
 
     PrivateChannel = Union[DMChannel, GroupChannel]
 
@@ -149,6 +196,16 @@ class _LoopSentinel:
 _loop: Any = _LoopSentinel()
 
 
+class RTCRegion(NamedTuple):
+    region: str
+    ips: List[str]
+
+
+class LocationInfo(NamedTuple):
+    country_code: str
+    subdivision_code: Optional[str]
+
+
 class Client:
     r"""Represents a client connection that connects to Discord.
     This class is used to interact with the Discord WebSocket and API.
@@ -162,6 +219,10 @@ class Client:
             .. versionadded:: 2.0
 
     A number of options can be passed to the :class:`Client`.
+
+    .. versionchanged:: 2.1
+
+        Removed the ``http_trace`` parameter.
 
     Parameters
     -----------
@@ -200,7 +261,7 @@ class Client:
 
             If this is set to ``False``, the following consequences will occur:
 
-            - Large guilds (over 75,000 members) will not dispatch any non-stateful events (e.g. :func:`.on_message`, :func:`.on_reaction_add`, :func:`.on_typing`, etc.)
+            - Large guilds (over 75,000 members) may not dispatch any non-stateful events (e.g. :func:`.on_message`, :func:`.on_reaction_add`, :func:`.on_typing`, etc.)
             - :attr:`~Guild.threads` will only contain threads the client has joined.
             - Guilds will not be chunkable and member events (e.g. :func:`.on_member_update`) will not be dispatched.
                 - Most :func:`.on_user_update` occurences will not be dispatched.
@@ -228,6 +289,10 @@ class Client:
         .. versionadded:: 2.0
     afk: :class:`bool`
         Whether to start your session as AFK. Defaults to ``False``.
+
+        .. versionadded:: 2.1
+    idle_since: Optional[:class:`datetime.datetime`]
+        The time to set the client as idle since. If ``None``, the client is not idle.
 
         .. versionadded:: 2.1
     allowed_mentions: Optional[:class:`AllowedMentions`]
@@ -260,12 +325,6 @@ class Client:
         The default behavior is ``True`` (what the client does).
 
         .. versionadded:: 2.0
-    http_trace: :class:`aiohttp.TraceConfig`
-        The trace configuration to use for tracking HTTP requests the library does using ``aiohttp``.
-        This allows you to check requests the library is using. For more information, check the
-        `aiohttp documentation <https://docs.aiohttp.org/en/stable/client_advanced.html#client-tracing>`_.
-
-        .. versionadded:: 2.0
     captcha_handler: Optional[Callable[[:class:`.CaptchaRequired`, :class:`.Client`], Awaitable[:class:`str`]]
         A function that solves captcha challenges.
 
@@ -287,6 +346,32 @@ class Client:
         A list of preferred RTC regions to connect to. This overrides Discord's suggested list.
 
         .. versionadded:: 2.1
+    canary: :class:`bool`
+        Whether to forcefully route all requests to the canary API. This is useful for testing new features.
+
+        Note that this doesn't use the canary release channel.
+
+        .. versionadded:: 2.1
+    apm_tracing: :class:`bool`
+        Whether to enable Application Performance Monitoring (APM) tracing.
+
+        This will print debug logs for every HTTP request made by the library with an APM trace URL
+        that Discord employees can view.
+
+        .. versionadded:: 2.1
+    timezone: :class:`str`
+        The timezone name to announce to Discord, in the format of `Region/City`.
+        Defaults to system timezone.
+
+        .. versionadded:: 2.1
+    installation_id: Optional[:class:`str`]
+        The installation ID to identify the client with. This is used by Discord to identify
+        unique client installations for Apex experiment tracking. By default, this is only
+        persisted per session, but if given here, it will be persisted across sessions.
+
+        If invalid, Discord will ignore it and generate one for you.
+
+        .. versionadded:: 2.2
 
     Attributes
     -----------
@@ -294,28 +379,28 @@ class Client:
         The websocket gateway the client is currently connected to. Could be ``None``.
     """
 
-    def __init__(self, **options: Any) -> None:
+    def __init__(self, **options: Unpack[_ClientOptions]) -> None:
         self.loop: asyncio.AbstractEventLoop = _loop
         # self.ws is set in the connect method
         self.ws: DiscordWebSocket = None  # type: ignore
         self._listeners: Dict[str, List[Tuple[asyncio.Future, Callable[..., bool]]]] = {}
 
-        proxy: Optional[str] = options.pop('proxy', None)
-        proxy_auth: Optional[aiohttp.BasicAuth] = options.pop('proxy_auth', None)
-        unsync_clock: bool = options.pop('assume_unsync_clock', True)
-        http_trace: Optional[aiohttp.TraceConfig] = options.pop('http_trace', None)
-        max_ratelimit_timeout: Optional[float] = options.pop('max_ratelimit_timeout', None)
         self.captcha_handler: Optional[Callable[[CaptchaRequired, Client], Awaitable[str]]] = options.pop(
             'captcha_handler', None
         )
         self.http: HTTPClient = HTTPClient(
-            proxy=proxy,
-            proxy_auth=proxy_auth,
-            unsync_clock=unsync_clock,
-            http_trace=http_trace,
+            loop=self.loop,
+            proxy=options.pop('proxy', None),
+            proxy_auth=options.pop('proxy_auth', None),
+            unsync_clock=options.pop('assume_unsync_clock', True),
             captcha=self.handle_captcha,
-            max_ratelimit_timeout=max_ratelimit_timeout,
-            locale=lambda: self._connection.locale,
+            max_ratelimit_timeout=options.pop('max_ratelimit_timeout', None),
+            default_ratelimit_limit=options.pop('default_ratelimit_limit', None) or 1,
+            debug_options=self._get_debug_options(**options),
+            rpc_proxy=options.pop('rpc_proxy', None),
+            proxy_gateway=options.pop('proxy_gateway', True),
+            timezone=options.pop('timezone', None) or None,
+            client=self,
         )
 
         self._handlers: Dict[str, Callable[..., None]] = {
@@ -366,19 +451,42 @@ class Client:
             **options,
         )
 
+    def _get_debug_options(self, **options: Any) -> Sequence[str]:
+        # The list is as follows:
+        # trace, canary, logGatewayEvents, logOverlayEvents, logAnalyticsEvents, sourceMapsEnabled, axeEnabled, cssDebuggingEnabled, layoutDebuggingEnabled
+        # analyticsDebuggerEnabled, bugReporterEnabled, idleStatusIndicatorEnabled, onlyShowPreviewAppCollections, disableAppCollectionsCache, isStreamInfoOverlayEnabled, preventPopoutClose
+        # Only the first two seem to have any API implications
+        debug_options = options.pop('debug_options', None)
+        if debug_options is None:
+            debug_options = ['bugReporterEnabled']
+        if options.pop('canary', None):
+            debug_options.insert(0, 'canary')
+        if options.pop('trace', None):
+            debug_options.insert(0, 'trace')
+        return debug_options
+
     def _handle_ready(self) -> None:
         self._ready.set()
 
     def _handle_connect(self) -> None:
-        state = self._connection
+        if self.ws._has_sent_presence:
+            _log.debug('Skipping initial presence as one has already been sent.')
+            return
+
         activities = self.initial_activities
         status = self.initial_status
-        if status or activities:
+        afk = self.initial_afk
+        since = self.initial_idle_since
+        if status or activities or afk or since:
             if status is None:
-                status = getattr(state.settings, 'status', None) or Status.unknown
-            _log.debug('Setting initial presence to %s %s', status, activities)
+                status = getattr(self._connection.settings, 'status', None) or Status.unknown
+            _log.debug(
+                'Setting initial presence to (status=%s, activities=%s, afk=%s, since=%s)', status, activities, afk, since
+            )
             self.loop.create_task(
-                self.change_presence(activities=activities, status=status, edit_settings=self._sync_presences)
+                self.change_presence(
+                    activities=activities, status=status, afk=afk, idle_since=since, edit_settings=self._sync_presences
+                )
             )
 
     @property
@@ -601,7 +709,7 @@ class Client:
 
     @property
     def experiments(self) -> Sequence[UserExperiment]:
-        """Sequence[:class:`.UserExperiment`]: The experiments assignments for the connected client.
+        """Sequence[:class:`.UserExperiment`]: The experiment assignments for the connected client.
 
         .. versionadded:: 2.1
         """
@@ -609,16 +717,53 @@ class Client:
 
     @property
     def guild_experiments(self) -> Sequence[GuildExperiment]:
-        """Sequence[:class:`.GuildExperiment`]: The guild experiments assignments for the connected client.
+        """Sequence[:class:`.GuildExperiment`]: The guild experiment assignments for the connected client.
 
         .. versionadded:: 2.1
         """
         return utils.SequenceProxy(self._connection.guild_experiments.values())
 
-    def get_experiment(self, experiment: Union[str, int], /) -> Optional[Union[UserExperiment, GuildExperiment]]:
-        """Returns a user or guild experiment from the given experiment identifier.
+    @property
+    def id(self) -> Optional[int]:
+        # Purposely undocumented as this is kinda confusing
+        installation_id = self._connection.installation_id
+        if not installation_id:
+            return
+
+        try:
+            return int(installation_id.split('.')[0])
+        except Exception:
+            return
+
+    @property
+    def installation_id(self) -> Optional[str]:
+        """Optional[:class:`str`]: The installation ID of the connected client.
+
+        This is used by Discord to identify unique client installations for Apex experiment tracking. By default, this is only
+        persisted per session, but if given in the constructor, it will be persisted across sessions.
+
+        .. versionadded:: 2.2
+        """
+        return self._connection.installation_id
+
+    @property
+    def apex_experiments(self) -> Sequence[ApexExperiment]:
+        """Sequence[:class:`.ApexExperiment`]: The Apex experiment assignments for the connected client.
+
+        .. versionadded:: 2.2
+        """
+        return utils.SequenceProxy(self._connection.apex_experiments.values())
+
+    def get_experiment(
+        self, experiment: Union[str, int], /
+    ) -> Optional[Union[UserExperiment, GuildExperiment, ApexExperiment]]:
+        """Returns a user, guild, or Apex experiment from the given experiment identifier.
 
         .. versionadded:: 2.1
+
+        .. versionchanged:: 2.2
+
+            This will now also return :class:`.ApexExperiment` instances.
 
         Parameters
         -----------
@@ -627,7 +772,7 @@ class Client:
 
         Returns
         --------
-        Optional[Union[:class:`.UserExperiment`, :class:`.GuildExperiment`]]
+        Optional[Union[:class:`.UserExperiment`, :class:`.GuildExperiment`, :class:`.ApexExperiment`]]
             The experiment, if found.
         """
         name = None
@@ -637,7 +782,10 @@ class Client:
         else:
             experiment_hash = int(experiment)
 
-        exp = self._connection.experiments.get(experiment_hash, self._connection.guild_experiments.get(experiment_hash))
+        exp = self._connection.experiments.get(
+            experiment_hash,
+            self._connection.guild_experiments.get(experiment_hash, self._connection.apex_experiments.get(experiment_hash)),
+        )
         if exp and not exp.name and name:
             # Backfill the name
             exp.name = name
@@ -740,32 +888,38 @@ class Client:
         _log.exception('Ignoring exception in %s', event_method)
 
     async def on_internal_settings_update(self, old_settings: UserSettings, new_settings: UserSettings, /):
-        if not self._sync_presences:
+        ws = self.ws
+        if not self._sync_presences or not ws:
             return
 
-        if (
-            old_settings is not None
-            and old_settings.status == new_settings.status
-            and old_settings.custom_activity == new_settings.custom_activity
-        ):
+        if old_settings.status == new_settings.status and old_settings.custom_activity == new_settings.custom_activity:
             return  # Nothing changed
 
-        current_activity = None
-        for activity in self.activities:
-            if activity.type != ActivityType.custom:
-                current_activity = activity
+        new_activity_payload = new_settings.custom_activity.to_dict() if new_settings.custom_activity else None
+        current_activity_payload = None
+        for activity in ws.activities:
+            if activity['type'] == ActivityType.custom.value:
+                current_activity_payload = activity
                 break
 
-        if new_settings.status == self.client_status and new_settings.custom_activity == current_activity:
+        if new_settings.status.value == ws.status and new_activity_payload == current_activity_payload:
             return  # Nothing changed
 
-        status = new_settings.status
-        activities = [a for a in self.client_activities if a.type != ActivityType.custom]
-        if new_settings.custom_activity is not None:
-            activities.append(new_settings.custom_activity)
+        status = new_settings.status.value
+        activities = list(ws.activities)
+        for i, activity in enumerate(activities):
+            if activity['type'] == ActivityType.custom.value:
+                if new_activity_payload is None:
+                    activities.pop(i)
+                else:
+                    activities[i] = new_activity_payload
+                break
+        else:
+            if new_activity_payload is not None:
+                activities.append(new_activity_payload)
 
-        _log.debug('Syncing presence to %s %s', status, new_settings.custom_activity)
-        await self.change_presence(status=status, activities=activities, edit_settings=False)
+        _log.debug('Syncing presence to status=%r, activity=%r.', status, new_settings.custom_activity)
+        await self.ws.change_presence(status=status, activities=activities, afk=ws.afk, since=ws.idle_since)
 
     # Hooks
 
@@ -828,6 +982,7 @@ class Client:
         loop = asyncio.get_running_loop()
         self.loop = loop
         self._connection.loop = loop
+        self.http.loop = loop
         await self._connection.async_setup()
 
         self._ready = asyncio.Event()
@@ -896,12 +1051,13 @@ class Client:
         data = await state.http.static_login(token.strip())
         state.analytics_token = data.get('analytics_token', '')
         state.user = ClientUser(state=state, data=data)
+        state._users[state.user.id] = state.user  # type: ignore
         await self.setup_hook()
 
     async def connect(self, *, reconnect: bool = True) -> None:
         """|coro|
 
-        Creates a websocket connection and lets the websocket listen
+        Creates a WebSocket connection and lets the WebSocket listen
         to messages from Discord. This is a loop that runs the entire
         event system and miscellaneous aspects of the library. Control
         is not resumed until the WebSocket connection is terminated.
@@ -937,7 +1093,7 @@ class Client:
             except ReconnectWebSocket as e:
                 _log.debug('Got a request to %s the websocket.', e.op)
                 self.dispatch('disconnect')
-                ws_params.update(sequence=self.ws.sequence, resume=e.resume, session=self.ws.session_id)
+                ws_params.update(sequence=self.ws.sequence, resume=e.resume, session=self.ws.session_id, old_ws=self.ws)
                 if e.resume:
                     ws_params['gateway'] = self.ws.gateway
                 continue
@@ -948,6 +1104,7 @@ class Client:
                 ConnectionClosed,
                 aiohttp.ClientError,
                 asyncio.TimeoutError,
+                CurlError,
             ) as exc:
                 self.dispatch('disconnect')
                 if not reconnect:
@@ -968,6 +1125,7 @@ class Client:
                         initial=False,
                         resume=True,
                         session=self.ws.session_id,
+                        old_ws=self.ws,
                     )
                     continue
 
@@ -981,7 +1139,7 @@ class Client:
                         raise
 
                 retry = backoff.delay()
-                _log.exception("Attempting a reconnect in %.2fs", retry)
+                _log.exception('Attempting a reconnect in %.2fs', retry)
                 await asyncio.sleep(retry)
                 # Always try to RESUME the connection
                 # If the connection is not RESUME-able then the gateway will invalidate the session
@@ -991,6 +1149,7 @@ class Client:
                     gateway=self.ws.gateway,
                     resume=True,
                     session=self.ws.session_id,
+                    old_ws=self.ws,
                 )
 
     async def close(self) -> None:
@@ -1173,7 +1332,7 @@ class Client:
             The client may be setting multiple activities, these can be accessed under :attr:`initial_activities`.
         """
         state = self._connection
-        return create_activity(state._activities[0], state) if state._activities else None
+        return create_activity(state._activities[0], state, state.self_id) if state._activities else None
 
     @initial_activity.setter
     def initial_activity(self, value: Optional[ActivityTypes]) -> None:
@@ -1188,7 +1347,7 @@ class Client:
     def initial_activities(self) -> List[ActivityTypes]:
         """List[:class:`.BaseActivity`]: The activities set upon logging in."""
         state = self._connection
-        return [create_activity(activity, state) for activity in state._activities]
+        return [create_activity(activity, state, state.self_id) for activity in state._activities]
 
     @initial_activities.setter
     def initial_activities(self, values: Sequence[ActivityTypes]) -> None:
@@ -1218,6 +1377,34 @@ class Client:
             raise TypeError('status must derive from Status')
 
     @property
+    def initial_afk(self) -> bool:
+        """:class:`bool`: Whether the client is set to AFK upon logging in.
+
+        .. versionadded:: 2.2
+        """
+        return self._connection._afk
+
+    @initial_afk.setter
+    def initial_afk(self, value: bool):
+        self._connection._afk = bool(value)
+
+    @property
+    def initial_idle_since(self) -> Optional[datetime]:
+        """Optional[:class:`datetime.datetime`]: When the client is set to go idle upon logging in.
+
+        .. versionadded:: 2.2
+        """
+        idle_since = self._connection._idle_since
+        if idle_since is not None:
+            return utils.parse_timestamp(idle_since)
+
+    @initial_idle_since.setter
+    def initial_idle_since(self, value: Optional[datetime]):
+        if value is not None and not isinstance(value, datetime):
+            raise TypeError('idle_since must be a datetime.datetime or None')
+        self._connection._idle_since = int(value.timestamp() * 1000) if value else 0
+
+    @property
     def status(self) -> Status:
         """:class:`.Status`: The user's overall status.
 
@@ -1225,7 +1412,7 @@ class Client:
         """
         status = getattr(self._connection.all_session, 'status', None)
         if status is None and not self.is_closed():
-            status = getattr(self._connection.settings, 'status', status)
+            status = self.client_status
         return status or Status.offline
 
     @property
@@ -1244,7 +1431,10 @@ class Client:
         """
         status = getattr(self._connection.current_session, 'status', None)
         if status is None and not self.is_closed():
-            status = getattr(self._connection.settings, 'status', status)
+            if self.ws is not None and self.ws.status != 'unknown':
+                status = try_enum(Status, self.ws.status)
+            else:
+                status = getattr(self._connection.settings, 'status', status)
         return status or Status.offline
 
     def is_on_mobile(self) -> bool:
@@ -1255,8 +1445,8 @@ class Client:
         return any(session.client == ClientType.mobile for session in self._connection._sessions.values())
 
     @property
-    def activities(self) -> Tuple[ActivityTypes]:
-        """Tuple[Union[:class:`.BaseActivity`, :class:`.Spotify`]]: Returns the activities
+    def activities(self) -> Tuple[ActivityTypes, ...]:
+        """Tuple[:class:`.BaseActivity`, ...]: Returns the activities
         the client is currently doing.
 
         .. versionadded:: 2.0
@@ -1270,13 +1460,12 @@ class Client:
         state = self._connection
         activities = state.all_session.activities if state.all_session else None
         if activities is None and not self.is_closed():
-            activity = getattr(state.settings, 'custom_activity', None)
-            activities = (activity,) if activity else activities
+            activities = self.client_activities
         return activities or tuple()
 
     @property
     def activity(self) -> Optional[ActivityTypes]:
-        """Optional[Union[:class:`.BaseActivity`, :class:`.Spotify`]]: Returns the primary
+        """Optional[:class:`.BaseActivity`]: Returns the primary
         activity the client is currently doing. Could be ``None`` if no activity is being done.
 
         .. versionadded:: 2.0
@@ -1295,8 +1484,8 @@ class Client:
             return activities[0]
 
     @property
-    def client_activities(self) -> Tuple[ActivityTypes]:
-        """Tuple[Union[:class:`.BaseActivity`, :class:`.Spotify`]]: Returns the activities
+    def client_activities(self) -> Tuple[ActivityTypes, ...]:
+        """Tuple[:class:`.BaseActivity`, ...]: Returns the activities
         the client is currently doing through this library, if applicable.
 
         .. versionadded:: 2.0
@@ -1304,8 +1493,11 @@ class Client:
         state = self._connection
         activities = state.current_session.activities if state.current_session else None
         if activities is None and not self.is_closed():
-            activity = getattr(state.settings, 'custom_activity', None)
-            activities = (activity,) if activity else activities
+            if self.ws is not None and self.ws.status != 'unknown':
+                activities = tuple(create_activity(a, state, state.self_id) for a in self.ws.activities)
+            else:
+                activity = getattr(state.settings, 'custom_activity', None)
+                activities = (activity,) if activity else activities
         return activities or tuple()
 
     def is_afk(self) -> bool:
@@ -1742,7 +1934,7 @@ class Client:
 
         .. code-block:: python3
 
-            game = discord.Game("with the API")
+            game = discord.Activity(name="with the API")
             await client.change_presence(status=discord.Status.idle, activity=game)
 
         Parameters
@@ -1783,40 +1975,47 @@ class Client:
         """
         if activity is not MISSING and activities is not MISSING:
             raise TypeError('Cannot pass both activity and activities')
+        ws = self.ws
 
         skip_activities = False
         if activities is MISSING:
             if activity is not MISSING:
                 activities = [activity] if activity else []
+                activities_data = [activity.to_dict()] if activity else []
             else:
-                activities = list(self.client_activities)
+                if ws.status == 'unknown':
+                    activities_data = [activity.to_dict() for activity in self.client_activities]
+                else:
+                    activities_data = self.ws.activities
                 skip_activities = True
         else:
-            activities = activities or []
+            activities_data = [a.to_dict() for a in activities] if activities else []
 
         skip_status = status is MISSING
         if status is MISSING:
-            status = self.client_status
-        if status is Status.offline:
-            status = Status.invisible
+            status_str = ws.status if ws.status != 'unknown' else self.client_status.value
+        elif status is Status.offline:
+            status_str = Status.invisible.value
+        else:
+            status_str = str(status)
 
         if afk is MISSING:
             afk = self.ws.afk if self.ws else False
 
         if idle_since is MISSING:
-            since = self.ws.idle_since if self.ws else 0
+            since = ws.idle_since
         else:
             since = int(idle_since.timestamp() * 1000) if idle_since else 0
 
         custom_activity = None
         if not skip_activities:
             for activity in activities:
-                if getattr(activity, 'type', None) is ActivityType.custom:
+                if activity.type is ActivityType.custom:
                     if custom_activity is not None:
                         raise ValueError('More than one custom activity was passed')
                     custom_activity = activity
 
-        await self.ws.change_presence(status=status, activities=activities, afk=afk, since=since)
+        await self.ws.change_presence(status=status_str, activities=activities_data, afk=afk, since=since)
 
         if edit_settings and self.settings:
             payload: Dict[str, Any] = {}
@@ -1854,10 +2053,8 @@ class Client:
         self_deaf: :class:`bool`
             Indicates if the client should be self-deafened.
         self_video: :class:`bool`
-            Indicates if the client is using video. Untested & unconfirmed
-            (do not use).
+            Indicates if the client is using video. Do not use.
         """
-        state = self._connection
         ws = self.ws
         channel_id = channel.id if channel else None
 
@@ -2066,14 +2263,26 @@ class Client:
             Guild with given ID does not exist/have discovery enabled.
         HTTPException
             Joining the guild failed.
+        ValueError
+            Attempted to lurk a guild without a session.
 
         Returns
         --------
         :class:`.Guild`
-            The guild that was joined.
+            The guild joined. This is not the same guild that is
+            added to cache.
         """
         state = self._connection
-        data = await state.http.join_guild(guild_id, lurking, state.session_id)
+        if lurking and not state.session_id:
+            raise ValueError('Cannot lurk a guild without a session')
+
+        data = await state.http.join_guild(
+            guild_id,
+            lurking,
+            state.session_id if lurking else None,
+            str(uuid.uuid4()).replace('-', '') if lurking else None,
+            'Guild%20Discovery' if lurking else None,
+        )
         guild = state.create_guild(data)
         guild._cs_joined = not lurking
         return guild
@@ -2164,6 +2373,8 @@ class Client:
         /,
         *,
         with_counts: bool = True,
+        with_permissions: bool = True,
+        with_expiration: bool = True,
         scheduled_event_id: Optional[int] = None,
     ) -> Invite:
         """|coro|
@@ -2180,10 +2391,6 @@ class Client:
 
             ``url`` parameter is now positional-only.
 
-        .. versionchanged:: 2.1
-
-            The ``with_expiration`` parameter has been removed.
-
         Parameters
         -----------
         url: Union[:class:`.Invite`, :class:`str`]
@@ -2192,12 +2399,26 @@ class Client:
             Whether to include count information in the invite. This fills the
             :attr:`.Invite.approximate_member_count` and :attr:`.Invite.approximate_presence_count`
             fields.
+        with_expiration: :class:`bool`
+            Whether to include the expiration date of the invite. This fills the
+            :attr:`.Invite.expires_at` field.
+
+            .. versionadded:: 2.0
+
+            .. deprecated:: 2.1
+                This parameter is deprecated and will be removed in a future version as it is no
+                longer needed to fill the :attr:`.Invite.expires_at` field.
+        with_permissions: :class:`bool`
+            Whether to include permission information in the invite. This fills the
+            :attr:`.Invite.is_nickname_changeable` field.
+
+            .. versionadded:: 2.1
         scheduled_event_id: Optional[:class:`int`]
             The ID of the scheduled event this invite is for.
 
             .. note::
 
-                It is not possible to provide a url that contains an ``event_id`` parameter
+                It is not possible to provide a URL that contains an ``event_id`` parameter
                 when using this parameter.
 
             .. versionadded:: 2.0
@@ -2205,7 +2426,7 @@ class Client:
         Raises
         -------
         ValueError
-            The url contains an ``event_id``, but ``scheduled_event_id`` has also been provided.
+            The URL contains an ``event_id``, but ``scheduled_event_id`` has also been provided.
         NotFound
             The invite has expired or is invalid.
         HTTPException
@@ -2227,6 +2448,7 @@ class Client:
         data = await self.http.get_invite(
             resolved.code,
             with_counts=with_counts,
+            with_permissions=with_permissions,
             guild_scheduled_event_id=scheduled_event_id,
         )
         return Invite.from_incomplete(state=self._connection, data=data)
@@ -2269,6 +2491,8 @@ class Client:
         ------
         HTTPException
             Using the invite failed.
+        ValueError
+            Attempted to accept a guest invite without a session.
 
         Returns
         -------
@@ -2281,12 +2505,16 @@ class Client:
         data = await state.http.get_invite(
             resolved.code,
             with_counts=True,
+            with_permissions=True,
             input_value=resolved.code if isinstance(url, Invite) else url,
         )
         if isinstance(url, Invite):
             invite = url
         else:
             invite = Invite.from_incomplete(state=state, data=data)
+
+        if invite.flags.guest and not state.session_id:
+            raise ValueError('Cannot accept guest invites without a session')
 
         state = self._connection
         type = invite.type
@@ -2302,7 +2530,7 @@ class Client:
         )
         return Invite.from_incomplete(state=state, data=data, message=invite._message)
 
-    async def delete_invite(self, invite: Union[Invite, str], /) -> Invite:
+    async def delete_invite(self, invite: Union[Invite, str], /, *, reason: Optional[str] = None) -> Invite:
         """|coro|
 
         Revokes an :class:`.Invite`, URL, or ID to an invite.
@@ -2339,7 +2567,7 @@ class Client:
         """
         resolved = utils.resolve_invite(invite)
         state = self._connection
-        data = await state.http.delete_invite(resolved.code)
+        data = await state.http.delete_invite(resolved.code, reason=reason)
         return Invite.from_incomplete(state=state, data=data)
 
     async def revoke_invites(self) -> List[Invite]:
@@ -2441,15 +2669,14 @@ class Client:
         with_mutual_guilds: bool = True,
         with_mutual_friends_count: bool = False,
         with_mutual_friends: bool = True,
-        friend_token: str = MISSING,
     ) -> UserProfile:
         """|coro|
 
         Retrieves a :class:`.UserProfile` based on their user ID.
 
-        You must provide a valid ``friend_token``, share a guild with,
-        be friends with, or have an incoming friend request from this
-        user to get this information, unless the user is a bot.
+        You must share a guild with, be friends with, or have
+        an incoming friend request from this user to
+        get this information, unless the user is a bot.
 
         .. versionchanged:: 2.0
 
@@ -2474,10 +2701,6 @@ class Client:
             This fills in :attr:`.UserProfile.mutual_friends` and :attr:`.UserProfile.mutual_friends_count`.
 
             .. versionadded:: 2.0
-        friend_token: :class:`str`
-            The friend token to use for fetching the profile.
-
-            .. versionadded:: 2.1
 
         Raises
         -------
@@ -2498,7 +2721,6 @@ class Client:
             with_mutual_guilds=with_mutual_guilds,
             with_mutual_friends_count=with_mutual_friends_count,
             with_mutual_friends=with_mutual_friends,
-            friend_token=friend_token or None,
         )
 
         return UserProfile(state=state, data=data)
@@ -2644,12 +2866,17 @@ class Client:
         data = await self.http.get_sticker_pack(pack_id)
         return StickerPack(state=self._connection, data=data)
 
-    async def notes(self) -> List[Note]:
+    async def fetch_notes(self) -> Dict[int, str]:
         """|coro|
 
-        Retrieves a list of :class:`.Note` objects representing all your notes.
+        Retrieves all your user notes.
 
         .. versionadded:: 1.9
+
+        .. versionchanged:: 2.1
+
+            Renamed from ``notes`` to :meth:`fetch_notes` for forward compatibility.
+            This method now returns a dictionary mapping user IDs to notes instead of a list of ``Note`` objects.
 
         Raises
         -------
@@ -2658,23 +2885,27 @@ class Client:
 
         Returns
         --------
-        List[:class:`.Note`]
-            All your notes.
+        Dict[:class:`int`, :class:`str`]
+            A dictionary mapping user IDs to their notes.
         """
         state = self._connection
         data = await state.http.get_notes()
-        return [Note(state, int(id), note=note) for id, note in data.items()]
+        return {int(id): note for id, note in data.items()}
 
-    async def fetch_note(self, user_id: int, /) -> Note:
+    async def fetch_note(self, user_id: int, /) -> Optional[str]:
         """|coro|
 
-        Retrieves a :class:`.Note` for the specified user ID.
+        Retrieves a note for the specified user ID.
 
         .. versionadded:: 1.9
 
         .. versionchanged:: 2.0
 
             ``user_id`` parameter is now positional-only.
+
+        .. versionchanged:: 2.1
+
+            This method now returns a :class:`str` instead of a ``Note``.
 
         Parameters
         -----------
@@ -2688,12 +2919,15 @@ class Client:
 
         Returns
         --------
-        :class:`.Note`
+        Optional[:class:`str`]
             The note you requested.
         """
-        note = Note(self._connection, int(user_id))
-        await note.fetch()
-        return note
+        try:
+            data = await self.http.get_note(user_id)
+        except NotFound:
+            # Bad UX to propagate the 404 for unknown notes
+            return None
+        return data.get('note')
 
     async def fetch_connections(self) -> List[Connection]:
         """|coro|
@@ -3035,32 +3269,6 @@ class Client:
         data = await state.http.get_friend_suggestions()
         return [FriendSuggestion(state=state, data=d) for d in data]
 
-    async def friend_token(self) -> str:
-        """|coro|
-
-        Retrieves your friend token.
-
-        These can be used to fetch the user's profile without a mutual
-        and add the user as a friend regardless of their friend request settings.
-
-        To share, append it to the user's URL like so:
-        ``https://discord.com/users/{user.id}?friend_token={friend_token}``.
-
-        .. versionadded:: 2.1
-
-        Raises
-        -------
-        HTTPException
-            Retrieving your friend token failed.
-
-        Returns
-        --------
-        :class:`str`
-            Your friend token.
-        """
-        data = await self.http.get_friend_token()
-        return data['friend_token']
-
     async def fetch_country_code(self) -> str:
         """|coro|
 
@@ -3081,7 +3289,28 @@ class Client:
         data = await self.http.get_country_code()
         return data['country_code']
 
-    async def fetch_preferred_rtc_regions(self) -> List[Tuple[str, List[str]]]:
+    async def fetch_location_info(self) -> LocationInfo:
+        """|coro|
+
+        Retrieves the location information of the client.
+
+        .. versionadded:: 2.1
+
+        Raises
+        -------
+        HTTPException
+            Retrieving the location information failed.
+
+        Returns
+        -------
+        Tuple[:class:`str`, Optional[:class:`str`]]
+            The country code and subdivision code of the client.
+            This is also accessible as a namedtuple with ``country_code`` and ``subdivision_code`` attributes.
+        """
+        data = await self.http.get_location_info()
+        return LocationInfo(data['country_code'], data['subdivision_code'])
+
+    async def fetch_preferred_rtc_regions(self) -> List[RTCRegion]:
         """|coro|
 
         Retrieves the preferred RTC regions of the client.
@@ -3102,9 +3331,10 @@ class Client:
         -------
         List[Tuple[:class:`str`, List[:class:`str`]]]
             The region name and list of IPs for the closest voice regions.
+            This is also accessible as a namedtuple with ``region`` and ``ips`` attributes.
         """
         data = await self.http.get_preferred_voice_regions()
-        return [(v['region'], v['ips']) for v in data]
+        return [RTCRegion(v['region'], v['ips']) for v in data]
 
     async def create_dm(self, user: Snowflake, /) -> DMChannel:
         """|coro|
@@ -3170,16 +3400,13 @@ class Client:
         return GroupChannel(me=self.user, data=data, state=state)  # type: ignore # user is always present when logged in
 
     @overload
-    async def send_friend_request(self, user: _UserTag, /) -> None:
-        ...
+    async def send_friend_request(self, user: _UserTag, /) -> None: ...
 
     @overload
-    async def send_friend_request(self, user: str, /) -> None:
-        ...
+    async def send_friend_request(self, user: str, /) -> None: ...
 
     @overload
-    async def send_friend_request(self, username: str, discriminator: str, /) -> None:
-        ...
+    async def send_friend_request(self, username: str, discriminator: str, /) -> None: ...
 
     async def send_friend_request(self, *args: Union[_UserTag, str]) -> None:
         """|coro|
@@ -3408,6 +3635,36 @@ class Client:
         data = await state.http.get_public_applications(application_ids)
         return [PartialApplication(state=state, data=d) for d in data]
 
+    async def proxy_external_application_assets(self, application_id: int, *urls: str) -> List[str]:
+        r"""|coro|
+
+        Proxies up to 2 external asset URLs through Discord's media proxy,
+        for use in rich presence.
+
+        Parameters
+        -----------
+        application_id: :class:`int`
+            The rich presence application ID.
+        \*urls: :class:`str`
+            The external asset URLs to proxy.
+
+        Raises
+        -------
+        HTTPException
+            Proxying the assets failed.
+
+        Returns
+        --------
+        List[:class:`str`]
+            The proxied asset URLs.
+        """
+        if not urls:
+            return []
+
+        data = await self._connection.http.create_app_external_assets(application_id, urls)
+        prefix = 'https://media.discordapp.net/'
+        return [prefix + asset['external_asset_path'] for asset in data]
+
     async def teams(self, *, with_payout_account_status: bool = False) -> List[Team]:
         """|coro|
 
@@ -3523,7 +3780,7 @@ class Client:
     async def search_companies(self, query: str, /) -> List[Company]:
         """|coro|
 
-        Query your created companies.
+        Query companies registered on Discord.
 
         .. versionadded:: 2.0
 
@@ -3546,10 +3803,38 @@ class Client:
         data = await state.http.search_companies(query)
         return [Company(data=d) for d in data]
 
+    async def fetch_company(self, company_id: int, /) -> Company:
+        """|coro|
+
+        Retrieves a company with the given ID.
+
+        .. versionadded:: 2.1
+
+        Parameters
+        -----------
+        company_id: :class:`int`
+            The ID of the company to fetch.
+
+        Raises
+        -------
+        NotFound
+            The company was not found.
+        HTTPException
+            Retrieving the company failed.
+
+        Returns
+        -------
+        :class:`.Company`
+            The retrieved company.
+        """
+        state = self._connection
+        data = await state.http.get_company(company_id)
+        return Company(data=data)
+
     async def activity_statistics(self) -> List[ApplicationActivityStatistics]:
         """|coro|
 
-        Retrieves the available activity usage statistics for your owned applications.
+        Retrieves the available activity usage statistics for the games you play.
 
         .. versionadded:: 2.0
 
@@ -3567,12 +3852,19 @@ class Client:
         data = await state.http.get_activity_statistics()
         return [ApplicationActivityStatistics(state=state, data=d) for d in data]
 
-    async def relationship_activity_statistics(self) -> List[ApplicationActivityStatistics]:
+    async def global_activity_statistics(
+        self, *, with_users: bool = True, with_applications: bool = True
+    ) -> List[ApplicationActivityStatistics]:
         """|coro|
 
-        Retrieves the available activity usage statistics for your relationships' owned applications.
+        Retrieves the available activity usage statistics for the games your friends and
+        implicit relationships play.
 
         .. versionadded:: 2.0
+
+        .. versionchanged:: 2.1
+
+            Renamed from ``relationship_activity_statistics()`` to ``global_activity_statistics()``.
 
         Raises
         -------
@@ -3585,7 +3877,7 @@ class Client:
             The activity statistics.
         """
         state = self._connection
-        data = await state.http.get_global_activity_statistics()
+        data = await state.http.get_global_activity_statistics(with_users=with_users, with_applications=with_applications)
         return [ApplicationActivityStatistics(state=state, data=d) for d in data]
 
     async def payment_sources(self) -> List[PaymentSource]:
@@ -3896,7 +4188,7 @@ class Client:
         payment_source_token: Optional[str] = None,
         purchase_token: Optional[str] = None,
         return_url: Optional[str] = None,
-        gateway_checkout_context: Optional[str] = None,
+        gateway_checkout_context: Optional[MetadataObject] = None,
         code: Optional[str] = None,
         metadata: Optional[MetadataObject] = None,
         guild: Optional[Snowflake] = None,
@@ -3923,7 +4215,7 @@ class Client:
             The purchase token to use.
         return_url: Optional[:class:`str`]
             The URL to return to after the payment is complete.
-        gateway_checkout_context: Optional[:class:`str`]
+        gateway_checkout_context: Optional[Dict[:class:`str`, Any]]
             The current checkout context.
         code: Optional[:class:`str`]
             Unknown.
@@ -4143,7 +4435,7 @@ class Client:
         )
         return [Promotion(state=state, data=d) for d in data]
 
-    async def user_offer(self, *, payment_gateway: Optional[PaymentGateway] = None) -> UserOffer:
+    async def user_offer(self, *, discount_id: int = MISSING, payment_gateway: Optional[PaymentGateway] = None) -> UserOffer:
         """|coro|
 
         Retrieves the current user offer for your account.
@@ -4153,6 +4445,8 @@ class Client:
 
         Parameters
         -----------
+        discount_id: :class:`int`
+            The specific discount ID to fetch the offer of.
         payment_gateway: Optional[:class:`.PaymentGateway`]
             The payment gateway to fetch the user offer for.
             Used to fetch user offers for :attr:`.PaymentGateway.apple`
@@ -4171,15 +4465,24 @@ class Client:
             The user offer for your account.
         """
         state = self._connection
-        data = await state.http.get_user_offer(payment_gateway=int(payment_gateway) if payment_gateway else None)
+        data = await state.http.get_user_offer(
+            payment_gateway=int(payment_gateway) if payment_gateway else None,
+            offer_id=discount_id if discount_id is not MISSING else None,
+        )
         return UserOffer(data=data, state=state)
 
+    @utils.deprecated('Client.user_offer()')
     async def trial_offer(self) -> TrialOffer:
         """|coro|
 
         Retrieves the current trial offer for your account.
 
         .. versionadded:: 2.0
+
+        .. deprecated:: 2.1
+
+            This method is deprecated and will be removed in a future version.
+            Use :meth:`user_offer` instead.
 
         Raises
         -------
@@ -4243,7 +4546,7 @@ class Client:
         data = await state.http.get_library_entries(state.country_code or 'US')
         return [LibraryApplication(state=state, data=d) for d in data]
 
-    async def authorizations(self) -> List[OAuth2Token]:
+    async def oauth2_tokens(self) -> List[OAuth2Token]:
         """|coro|
 
         Retrieves the OAuth2 applications authorized on your account.
@@ -4272,9 +4575,9 @@ class Client:
         scopes: Collection[str],
         response_type: Optional[str] = None,
         redirect_uri: Optional[str] = None,
-        code_challenge_method: Optional[str] = None,
         code_challenge: Optional[str] = None,
         state: Optional[str] = None,
+        nonce: Optional[str] = None,
     ) -> OAuth2Authorization:
         """|coro|
 
@@ -4295,12 +4598,12 @@ class Client:
             The redirect URI that will be used for the authorization, if using the full OAuth2 flow.
             If this isn't provided and ``response_type`` is provided, then the default redirect URI
             for the application will be provided in the returned authorization.
-        code_challenge_method: Optional[:class:`str`]
-            The code challenge method that will be used for the PKCE authorization, if using the full OAuth2 flow.
         code_challenge: Optional[:class:`str`]
-            The code challenge that will be used for the PKCE authorization, if using the full OAuth2 flow.
+            The code challenge that will be used for PKCE authorization, if using the full OAuth2 flow.
         state: Optional[:class:`str`]
-            The state that will be used for authorization security.
+            The state that will be used for authorization security. You will need to verify this yourself.
+        nonce: Optional[:class:`str`]
+            The nonce that will be used for OpenID Connect authorization security. You will need to verify this yourself.
 
         Raises
         -------
@@ -4318,18 +4621,21 @@ class Client:
             list(scopes),
             response_type,
             redirect_uri,
-            code_challenge_method,
+            'S256' if code_challenge else None,
             code_challenge,
             state,
+            nonce,
         )
         return OAuth2Authorization(
             _state=_state,
             data=data,
             scopes=list(scopes),
             response_type=response_type,
-            code_challenge_method=code_challenge_method,
+            original_redirect_uri=redirect_uri,
+            code_challenge_method='S256' if code_challenge else None,
             code_challenge=code_challenge,
             state=state,
+            nonce=nonce,
         )
 
     async def create_authorization(
@@ -4340,9 +4646,9 @@ class Client:
         scopes: Collection[str],
         response_type: Optional[str] = None,
         redirect_uri: Optional[str] = None,
-        code_challenge_method: Optional[str] = None,
         code_challenge: Optional[str] = None,
         state: Optional[str] = None,
+        nonce: Optional[str] = None,
         guild: Snowflake = MISSING,
         channel: Snowflake = MISSING,
         permissions: Permissions = MISSING,
@@ -4366,12 +4672,12 @@ class Client:
             The redirect URI to use for the authorization, if using the full OAuth2 flow.
             If this isn't provided and ``response_type`` is provided, then the default redirect URI
             for the application will be used.
-        code_challenge_method: Optional[:class:`str`]
-            The code challenge method to use for the PKCE authorization, if using the full OAuth2 flow.
         code_challenge: Optional[:class:`str`]
             The code challenge to use for the PKCE authorization, if using the full OAuth2 flow.
         state: Optional[:class:`str`]
-            The state to use for authorization security.
+            The state to use for authorization security. You will need to verify this yourself.
+        nonce: Optional[:class:`str`]
+            The nonce that will be used for OpenID Connect authorization security. You will need to verify this yourself.
         guild: :class:`.Guild`
             The guild to authorize for, if authorizing with the ``applications.commands`` or ``bot`` scopes.
         channel: Union[:class:`.TextChannel`, :class:`.VoiceChannel`, :class:`.StageChannel`]
@@ -4395,9 +4701,10 @@ class Client:
             list(scopes),
             response_type,
             redirect_uri,
-            code_challenge_method,
+            'S256' if code_challenge else None,
             code_challenge,
             state,
+            nonce,
             guild_id=guild.id if guild else None,
             webhook_channel_id=channel.id if channel else None,
             permissions=permissions.value if permissions else None,
@@ -4405,7 +4712,12 @@ class Client:
         return data['location']
 
     async def entitlements(
-        self, *, with_sku: bool = True, with_application: bool = True, entitlement_type: Optional[EntitlementType] = None
+        self,
+        *,
+        with_sku: bool = True,
+        with_application: bool = True,
+        include_ended: bool = True,
+        entitlement_type: Optional[EntitlementType] = None,
     ) -> List[Entitlement]:
         """|coro|
 
@@ -4420,6 +4732,10 @@ class Client:
         with_application: :class:`bool`
             Whether to include the application in the returned entitlements' SKUs.
             The premium subscription application is always returned.
+        include_ended: :class:`bool`
+            Whether to include ended entitlements in the returned list.
+
+            .. versionadded:: 2.1
         entitlement_type: Optional[:class:`.EntitlementType`]
             The type of entitlement to retrieve. If ``None`` then all entitlements are returned.
 
@@ -4437,6 +4753,7 @@ class Client:
         data = await state.http.get_user_entitlements(
             with_sku=with_sku,
             with_application=with_application,
+            exclude_ended=not include_ended,
             entitlement_type=int(entitlement_type) if entitlement_type else None,
         )
         return [Entitlement(state=state, data=d) for d in data]
@@ -4464,7 +4781,7 @@ class Client:
         data = await state.http.get_giftable_entitlements(state.country_code or 'US')
         return [Entitlement(state=state, data=d) for d in data]
 
-    async def premium_entitlements(self, *, exclude_consumed: bool = True) -> List[Entitlement]:
+    async def premium_entitlements(self, *, include_consumed: bool = True) -> List[Entitlement]:
         """|coro|
 
         Retrieves the entitlements this account has granted for the premium application.
@@ -4475,8 +4792,12 @@ class Client:
 
         Parameters
         -----------
-        exclude_consumed: :class:`bool`
-            Whether to exclude consumed entitlements.
+        include_consumed: :class:`bool`
+            Whether to include   consumed entitlements.
+
+            .. versionchanged:: 2.1
+
+                Renamed from ``exclude_consumed`` to ``include_consumed``.
 
         Raises
         -------
@@ -4489,20 +4810,26 @@ class Client:
             The entitlements retrieved.
         """
         return await self.fetch_entitlements(
-            self._connection.premium_subscriptions_application.id, exclude_consumed=exclude_consumed
+            self._connection.premium_subscriptions_application.id, include_consumed=include_consumed
         )
 
-    async def fetch_entitlements(self, application_id: int, /, *, exclude_consumed: bool = True) -> List[Entitlement]:
+    async def fetch_entitlements(self, application_id: int, /, *, include_consumed: bool = True) -> List[Entitlement]:
         """|coro|
 
         Retrieves the entitlements this account has granted for the given application.
+
+        .. versionadded:: 2.0
 
         Parameters
         -----------
         application_id: :class:`int`
             The ID of the application to fetch the entitlements for.
-        exclude_consumed: :class:`bool`
-            Whether to exclude consumed entitlements.
+        include_consumed: :class:`bool`
+            Whether to include consumed entitlements.
+
+            .. versionchanged:: 2.1
+
+                Renamed from ``exclude_consumed`` to ``include_consumed``.
 
         Raises
         -------
@@ -4515,7 +4842,7 @@ class Client:
             The entitlements retrieved.
         """
         state = self._connection
-        data = await state.http.get_user_app_entitlements(application_id, exclude_consumed=exclude_consumed)
+        data = await state.http.get_user_app_entitlements(application_id, exclude_consumed=not include_consumed)
         return [Entitlement(data=entitlement, state=state) for entitlement in data]
 
     async def fetch_gift(
@@ -5332,22 +5659,16 @@ class Client:
 
     @overload
     async def fetch_experiments(
-        self, with_guild_experiments: Literal[True] = ...
-    ) -> List[Union[UserExperiment, GuildExperiment]]:
-        ...
-
-    @overload
-    async def fetch_experiments(self, with_guild_experiments: Literal[False] = ...) -> List[UserExperiment]:
-        ...
+        self, *, with_guild_experiments: Literal[True] = ..., platform: Optional[ExperimentPlatform] = ...
+    ) -> List[Union[UserExperiment, GuildExperiment]]: ...
 
     @overload
     async def fetch_experiments(
-        self, with_guild_experiments: bool = True
-    ) -> Union[List[UserExperiment], List[Union[UserExperiment, GuildExperiment]]]:
-        ...
+        self, *, with_guild_experiments: Literal[False] = ..., platform: Optional[ExperimentPlatform] = ...
+    ) -> List[UserExperiment]: ...
 
     async def fetch_experiments(
-        self, with_guild_experiments: bool = True
+        self, *, with_guild_experiments: bool = True, platform: Optional[ExperimentPlatform] = None
     ) -> Union[List[UserExperiment], List[Union[UserExperiment, GuildExperiment]]]:
         """|coro|
 
@@ -5357,13 +5678,17 @@ class Client:
 
         .. note::
 
-            Certain guild experiments are only available via the gateway.
-            See :attr:`guild_experiments` for these.
+            Certain experiments are only available via the gateway.
+            See :attr:`experiments` and :attr:`guild_experiments` for these.
 
         Parameters
         -----------
         with_guild_experiments: :class:`bool`
             Whether to include guild experiment rollouts in the response.
+        platform: Optional[:class:`.ExperimentPlatform`]
+            The platform to retrieve additional experiments for.
+
+            .. versionadded:: 2.2
 
         Raises
         -------
@@ -5376,7 +5701,9 @@ class Client:
             The experiment rollouts.
         """
         state = self._connection
-        data = await state.http.get_experiments(with_guild_experiments=with_guild_experiments)
+        data = await state.http.get_experiments(
+            with_guild_experiments=with_guild_experiments, platform=str(platform) if platform else None
+        )
 
         experiments: List[Union[UserExperiment, GuildExperiment]] = [
             UserExperiment(state=state, data=exp) for exp in data['assignments']
@@ -5385,6 +5712,44 @@ class Client:
             experiments.append(GuildExperiment(state=state, data=exp))
 
         return experiments
+
+    async def fetch_apex_experiments(
+        self, *, surface: ApexExperimentSurface = ApexExperimentSurface.app
+    ) -> List[ApexExperiment]:
+        """|coro|
+
+        Retrieves the apex experiment rollouts available in relation to the user.
+
+        .. versionadded:: 2.2
+
+        .. note::
+
+            Certain experiments are only available via the gateway.
+            See :attr:`apex_experiments` for these.
+
+        Parameters
+        -----------
+        surface: :class:`.ApexExperimentSurface`
+            The surface to retrieve the apex experiments for.
+            Only supports :attr:`.ApexExperimentSurface.app` and :attr:`.ApexExperimentSurface.developer_portal`.
+
+        Raises
+        -------
+        HTTPException
+            Retrieving the apex experiment assignments failed.
+
+        Returns
+        -------
+        List[:class:`.ApexExperiment`]
+            The apex experiment rollouts.
+        """
+        state = self._connection
+        data = await state.http.get_apex_experiments(surface=int(surface))
+        exps, _, installation = ApexExperiment.parse(state, data)
+        if installation is not None:
+            # Our current installation ID is invalid
+            state.installation_id = installation
+        return list(exps.values())
 
     async def join_hub_waitlist(self, email: str, school: str) -> None:
         """|coro|
@@ -5439,12 +5804,10 @@ class Client:
         return [state.create_guild(d) for d in data.get('guilds_info', [])]  # type: ignore
 
     @overload
-    async def join_hub(self, guild: Snowflake, email: str, *, code: None = ...) -> None:
-        ...
+    async def join_hub(self, guild: Snowflake, email: str, *, code: None = ...) -> None: ...
 
     @overload
-    async def join_hub(self, guild: Snowflake, email: str, *, code: str = ...) -> Guild:
-        ...
+    async def join_hub(self, guild: Snowflake, email: str, *, code: str = ...) -> Guild: ...
 
     async def join_hub(self, guild: Snowflake, email: str, *, code: Optional[str] = None) -> Optional[Guild]:
         """|coro|
@@ -5551,3 +5914,55 @@ class Client:
         else:
             data = await http.pomelo_attempt_unauthed(username)
         return data['taken']
+
+    async def recent_avatars(self) -> List[RecentAvatar]:
+        """|coro|
+
+        Retrieves the recent avatars for the current user.
+
+        For premium users, the six most recent avatars will be returned.
+        Otherwise, only two will be returned.
+
+        .. versionadded:: 2.1
+
+        Raises
+        ------
+        HTTPException
+            Retrieving the recent avatars failed.
+
+        Returns
+        -------
+        List[:class:`.RecentAvatar`]
+            The recent avatars.
+        """
+        state = self._connection
+        user = state.user
+        data = await state.http.get_recent_avatars()
+        return [RecentAvatar(user=user, data=d) for d in data['avatars']]  # type: ignore # user will be present here
+
+    async def bulk_ack(self, acks: Mapping[ReadState, Snowflake], /) -> None:
+        """|coro|
+
+        Updates multiple read states' :attr:`.ReadState.last_acked_id` in bulk.
+
+        .. versionadded:: 2.1
+
+        Parameters
+        -----------
+        acks: Dict[:class:`.ReadState`, :class:`.abc.Snowflake`]
+            A mapping of read states to the last acknowledged entity ID (e.g. message ID).
+
+        Raises
+        ------
+        HTTPException
+            Updating the read states failed.
+        """
+        payload: List[BulkReadState] = [
+            {
+                'channel_id': read_state.id,
+                'read_state_type': read_state.type.value,
+                'message_id': last_acked.id,
+            }
+            for read_state, last_acked in acks.items()
+        ]  # type: ignore
+        await self._connection.http.ack_bulk(payload)

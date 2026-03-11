@@ -21,6 +21,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 """
+
 from __future__ import annotations
 
 import types
@@ -39,7 +40,12 @@ __all__ = (
     'AuditLogAction',
     'AuditLogActionCategory',
     'UserFlags',
+    'NameFont',
+    'NameEffect',
     'ActivityType',
+    'ActivityActionType',
+    'ActivityPlatform',
+    'HangStatusType',
     'NotificationLevel',
     'HighlightLevel',
     'ApplicationMembershipState',
@@ -129,23 +135,29 @@ __all__ = (
     'NetworkConnectionSpeed',
     'PollLayoutType',
     'MessageReferenceType',
+    'ReactionType',
+    'StatusDisplayType',
+    'OnboardingPromptType',
+    'OnboardingMode',
+    'CollectibleType',
+    'NameplatePalette',
+    'ExperimentPlatform',
+    'ApexExperimentUnitType',
+    'ApexExperimentSurface',
 )
-
-if TYPE_CHECKING:
-    from typing_extensions import Self
 
 
 def _create_value_cls(name: str, comparable: bool):
     # All the type ignores here are due to the type checker being unable to recognise
     # Runtime type creation without exploding.
     cls = namedtuple('_EnumValue_' + name, 'name value')
-    cls.__repr__ = lambda self: f'<{name}.{self.name}: {self.value!r}>'  # type: ignore
-    cls.__str__ = lambda self: f'{name}.{self.name}'  # type: ignore
+    cls.__repr__ = lambda self: f'<{name}.{self.name}: {self.value!r}>'
+    cls.__str__ = lambda self: f'{name}.{self.name}'
     if comparable:
-        cls.__le__ = lambda self, other: isinstance(other, self.__class__) and self.value <= other.value  # type: ignore
-        cls.__ge__ = lambda self, other: isinstance(other, self.__class__) and self.value >= other.value  # type: ignore
-        cls.__lt__ = lambda self, other: isinstance(other, self.__class__) and self.value < other.value  # type: ignore
-        cls.__gt__ = lambda self, other: isinstance(other, self.__class__) and self.value > other.value  # type: ignore
+        cls.__le__ = lambda self, other: isinstance(other, self.__class__) and self.value <= other.value
+        cls.__ge__ = lambda self, other: isinstance(other, self.__class__) and self.value >= other.value
+        cls.__lt__ = lambda self, other: isinstance(other, self.__class__) and self.value < other.value
+        cls.__gt__ = lambda self, other: isinstance(other, self.__class__) and self.value > other.value
     return cls
 
 
@@ -160,7 +172,7 @@ class EnumMeta(type):
         _enum_member_map_: ClassVar[Dict[str, Any]]
         _enum_value_map_: ClassVar[Dict[Any, Any]]
 
-    def __new__(cls, name: str, bases: Tuple[type, ...], attrs: Dict[str, Any], *, comparable: bool = False) -> Self:
+    def __new__(cls, name: str, bases: Tuple[type, ...], attrs: Dict[str, Any], *, comparable: bool = False) -> EnumMeta:
         value_mapping = {}
         member_mapping = {}
         member_names = []
@@ -218,7 +230,7 @@ class EnumMeta(type):
         try:
             return cls._enum_value_map_[value]
         except (KeyError, TypeError):
-            raise ValueError(f"{value!r} is not a valid {cls.__name__}")
+            raise ValueError(f'{value!r} is not a valid {cls.__name__}')
 
     def __getitem__(cls, key: str) -> Any:
         return cls._enum_member_map_[key]
@@ -323,6 +335,17 @@ class MessageType(Enum):
     guild_incident_report_false_alarm = 39
     purchase_notification = 44
     poll_result = 46
+    emoji_added = 63
+
+    def is_deletable(self) -> bool:
+        return self not in {
+            MessageType.recipient_add,
+            MessageType.recipient_remove,
+            MessageType.call,
+            MessageType.channel_name_change,
+            MessageType.channel_icon_change,
+            MessageType.thread_starter_message,
+        }
 
 
 class SpeakingState(Enum):
@@ -557,8 +580,16 @@ class AuditLogAction(Enum):
     automod_block_message                             = 143
     automod_flag_message                              = 144
     automod_timeout_member                            = 145
+    automod_quarantine_user                           = 146
     creator_monetization_request_created              = 150
     creator_monetization_terms_accepted               = 151
+    onboarding_prompt_create                          = 163
+    onboarding_prompt_update                          = 164
+    onboarding_prompt_delete                          = 165
+    onboarding_create                                 = 166
+    onboarding_update                                 = 167
+    home_settings_create                              = 190
+    home_settings_update                              = 191
     # fmt: on
 
     @property
@@ -619,11 +650,19 @@ class AuditLogAction(Enum):
             AuditLogAction.automod_block_message:                    None,
             AuditLogAction.automod_flag_message:                     None,
             AuditLogAction.automod_timeout_member:                   None,
+            AuditLogAction.automod_quarantine_user:                  None,
             AuditLogAction.creator_monetization_request_created:     None,
             AuditLogAction.creator_monetization_terms_accepted:      None,
+            AuditLogAction.onboarding_prompt_create:                 AuditLogActionCategory.create,
+            AuditLogAction.onboarding_prompt_update:                 AuditLogActionCategory.update,
+            AuditLogAction.onboarding_prompt_delete:                 AuditLogActionCategory.delete,
+            AuditLogAction.onboarding_create:                        AuditLogActionCategory.create,
+            AuditLogAction.onboarding_update:                        AuditLogActionCategory.update,
+            AuditLogAction.home_settings_create:                     AuditLogActionCategory.create,
+            AuditLogAction.home_settings_update:                     AuditLogActionCategory.update,
         }
         # fmt: on
-        return lookup[self]
+        return lookup.get(self, None)
 
     @property
     def target_type(self) -> Optional[str]:
@@ -662,10 +701,16 @@ class AuditLogAction(Enum):
             return 'integration_or_app_command'
         elif v < 143:
             return 'auto_moderation'
-        elif v < 146:
+        elif v < 147:
             return 'user'
         elif v < 152:
             return 'creator_monetization'
+        elif v < 166:
+            return 'onboarding_prompt'
+        elif v < 168:
+            return 'onboarding'
+        elif v < 192:
+            return 'home_settings'
 
 
 class UserFlags(Enum):
@@ -697,17 +742,84 @@ class UserFlags(Enum):
     restricted_collaborator = 2251799813685248
 
 
+class NameFont(Enum):
+    default = 11
+    bangers = 1
+    bio_rhyme = 2
+    cherry_bomb = 3
+    chicle = 4
+    compagnon = 5
+    museo_moderno = 6
+    neo_castel = 7
+    pixelify = 8
+    ribes = 9
+    sinistre = 10
+    zilla_slab = 12
+
+
+class NameEffect(Enum):
+    solid = 1
+    gradient = 2
+    neon = 3
+    toon = 4
+    pop = 5
+    glow = 6
+
+
 class ActivityType(Enum):
-    unknown = -1
     playing = 0
     streaming = 1
     listening = 2
     watching = 3
     custom = 4
     competing = 5
+    hang = 6
 
     def __int__(self) -> int:
         return self.value
+
+
+class ActivityActionType(Enum):
+    join = 1
+    spectate = 2
+    listen = 3
+    watch = 4
+    join_request = 5
+
+
+class ActivityPlatform(Enum):
+    desktop = 'desktop'
+    xbox = 'xbox'
+    samsung = 'samsung'
+    ios = 'ios'
+    android = 'android'
+    embedded = 'embedded'
+    ps4 = 'ps4'
+    ps5 = 'ps5'
+    meta_quest = 'meta_quest'
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class HangStatusType(Enum):
+    chilling = 'chilling'
+    gaming = 'gaming'
+    focusing = 'focusing'
+    brb = 'brb'
+    watching = 'watching'
+    custom = 'custom'
+
+    @property
+    def text(self) -> Optional[str]:
+        lookup: Dict[HangStatusType, str] = {
+            HangStatusType.chilling: 'chilling',
+            HangStatusType.gaming: 'gaming',
+            HangStatusType.focusing: 'studying',
+            HangStatusType.brb: 'brb',
+            HangStatusType.watching: 'watching stuff',
+        }
+        return lookup.get(self, None)
 
 
 class HypeSquadHouse(Enum):
@@ -1060,6 +1172,40 @@ class EmbeddedActivityReleasePhase(Enum):
 
 
 T = TypeVar('T')
+_UNICODE_LANG_MAP: Dict[str, str] = {
+    'bg': 'bg-BG',
+    'zh-CN': 'zh-CN',
+    'zh-TW': 'zh-TW',
+    'hr': 'hr-HR',
+    'cs': 'cs-CZ',
+    'da': 'da-DK',
+    'nl': 'nl-NL',
+    'en-US': 'en-US',
+    'en-GB': 'en-GB',
+    'fi': 'fi-FI',
+    'fr': 'fr-FR',
+    'de': 'de-DE',
+    'el': 'el-GR',
+    'hi': 'hi-IN',
+    'hu': 'hu-HU',
+    'id': 'id-ID',
+    'it': 'it-IT',
+    'ja': 'ja-JP',
+    'ko': 'ko-KR',
+    'lt': 'lt-LT',
+    'no': 'no-NO',
+    'pl': 'pl-PL',
+    'pt-BR': 'pt-BR',
+    'ro': 'ro-RO',
+    'ru': 'ru-RU',
+    'es-ES': 'es-ES',
+    'es-419': 'es-419',
+    'sv-SE': 'sv-SE',
+    'th': 'th-TH',
+    'tr': 'tr-TR',
+    'uk': 'uk-UA',
+    'vi': 'vi-VN',
+}
 
 
 class Locale(Enum):
@@ -1099,6 +1245,10 @@ class Locale(Enum):
 
     def __str__(self) -> str:
         return self.value
+
+    @property
+    def language_code(self) -> str:
+        return _UNICODE_LANG_MAP.get(self.value, self.value)
 
 
 E = TypeVar('E', bound='Enum')
@@ -1152,28 +1302,36 @@ AppCommandType = ApplicationCommandType
 
 
 class ConnectionType(Enum):
+    amazon_music = 'amazon-music'
     battle_net = 'battlenet'
+    bluesky = 'bluesky'
+    bungie = 'bungie'
     contacts = 'contacts'
     crunchyroll = 'crunchyroll'
+    domain = 'domain'
     ebay = 'ebay'
     epic_games = 'epicgames'
     facebook = 'facebook'
     github = 'github'
     instagram = 'instagram'
     league_of_legends = 'leagueoflegends'
+    mastodon = 'mastodon'
     paypal = 'paypal'
     playstation = 'playstation'
+    playstation_stg = 'playstation-stg'
     reddit = 'reddit'
+    roblox = 'roblox'
     riot_games = 'riotgames'
     samsung = 'samsung'
+    soundcloud = 'soundcloud'
     spotify = 'spotify'
     skype = 'skype'
     steam = 'steam'
     tiktok = 'tiktok'
     twitch = 'twitch'
     twitter = 'twitter'
-    youtube = 'youtube'
     xbox = 'xbox'
+    youtube = 'youtube'
 
     def __str__(self) -> str:
         return self.value
@@ -1208,7 +1366,6 @@ class PaymentSourceType(Enum):
     eps = 15
     ideal = 16
     cash_app = 17
-    payment_request = 99
 
 
 class PaymentGateway(Enum):
@@ -1258,6 +1415,7 @@ class SubscriptionDiscountType(Enum):
     entitlement = 2
     premium_legacy_upgrade_promotion = 3
     premium_trial = 4
+    default = 5
 
 
 class SubscriptionInterval(Enum):
@@ -1265,13 +1423,29 @@ class SubscriptionInterval(Enum):
     year = 2
     day = 3
 
+    @property
+    def duration(self) -> int:
+        _INTERVAL_TABLE = {
+            SubscriptionInterval.day: 1,
+            SubscriptionInterval.month: 30,
+            SubscriptionInterval.year: 365,
+        }
+        return _INTERVAL_TABLE[self]
+
 
 class SubscriptionPlanPurchaseType(Enum):
     default = 0
     gift = 1
     sale = 2
+    premium_tier_1 = 3
     nitro_classic = 3
+    premium_tier_2 = 4
     nitro = 4
+    mobile = 5
+    premium_tier_3 = 6
+    nitro_basic = 6
+    mobile_premium_tier_2 = 7
+    mobile_nitro = 7
 
 
 class PaymentStatus(Enum):
@@ -1350,6 +1524,7 @@ class SKUGenre(Enum):
     action_adventure = 9
     action_rpg = 2
     adventure = 8
+    arcade = 68
     artillery = 50
     baseball = 34
     basketball = 35
@@ -1373,6 +1548,7 @@ class SKUGenre(Enum):
     golf = 40
     hack_and_slash = 4
     hockey = 41
+    indie = 67
     life_simulator = 31
     light_gun = 24
     massively_multiplayer = 18
@@ -1384,6 +1560,7 @@ class SKUGenre(Enum):
     party_mini_game = 63
     pinball = 64
     platformer = 5
+    point_and_click = 69
     psychological_horror = 12
     puzzle = 57
     rpg = 22
@@ -1402,6 +1579,7 @@ class SKUGenre(Enum):
     surfing_wakeboarding = 46
     survival = 7
     survival_horror = 14
+    tactical = 66
     tower_defense = 52
     track_field = 45
     train_simulator = 30
@@ -1426,18 +1604,21 @@ class OperatingSystem(Enum):
 
     android = -1
     ios = -2
-    unknown = -3
+    playstation = -3
+    unknown = -99
 
     @classmethod
-    def from_string(cls, value: str) -> Self:
+    def from_string(cls, value: str) -> OperatingSystem:
         lookup = {
             'windows': cls.windows,
             'win32': cls.windows,
             'macos': cls.macos,
             'darwin': cls.macos,
+            'osx': cls.macos,
             'linux': cls.linux,
             'android': cls.android,
             'ios': cls.ios,
+            'playstation': cls.playstation,
             'unknown': cls.unknown,
         }
         return lookup.get(value, create_unknown_value(cls, value))
@@ -1446,12 +1627,8 @@ class OperatingSystem(Enum):
         lookup = {
             OperatingSystem.windows: 'win32',
             OperatingSystem.macos: 'darwin',
-            OperatingSystem.linux: 'linux',
-            OperatingSystem.android: 'android',
-            OperatingSystem.ios: 'ios',
-            OperatingSystem.unknown: 'unknown',
         }
-        return lookup[self]
+        return lookup.get(self, self.name)
 
     def __str__(self):
         return self.to_string()
@@ -1639,6 +1816,7 @@ class ReadStateType(Enum):
     notification_center = 2
     guild_home = 3
     onboarding = 4
+    message_requests = 5
 
 
 class DirectoryEntryType(Enum):
@@ -1705,6 +1883,73 @@ class PurchaseNotificationType(Enum):
 class ReactionType(Enum):
     normal = 0
     burst = 1
+
+
+class PromotionType(Enum):
+    bogo = 1
+    partner = 2
+    third_party_inbound = 3
+    third_party_outbound = 4
+    marketing_moment = 5
+
+
+class StatusDisplayType(Enum):
+    name = 0  # pyright: ignore[reportAssignmentType]
+    state = 1
+    details = 2
+
+
+class OnboardingPromptType(Enum):
+    multiple_choice = 0
+    dropdown = 1
+
+
+class OnboardingMode(Enum):
+    default = 0
+    advanced = 1
+
+
+class CollectibleType(Enum):
+    nameplate = 'nameplate'
+
+
+class NameplatePalette(Enum):
+    crimson = 'crimson'
+    berry = 'berry'
+    sky = 'sky'
+    teal = 'teal'
+    forest = 'forest'
+    bubble_gum = 'bubble_gum'
+    violet = 'violet'
+    cobalt = 'cobalt'
+    clover = 'clover'
+    lemon = 'lemon'
+    white = 'white'
+
+
+class ExperimentPlatform(Enum):
+    developer_portal = 'DEVELOPER_PORTAL'
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class ApexExperimentUnitType(Enum):
+    user = 1
+    installation = 2
+    guild = 3
+    custom = 4
+
+
+class ApexExperimentSurface(Enum):
+    api = 1
+    app = 2
+    developer_portal = 3
+    admin_panel = 4
+    ads_budget_ab = 5
+
+    def __int__(self) -> int:
+        return self.value
 
 
 def create_unknown_value(cls: Type[E], val: Any) -> E:

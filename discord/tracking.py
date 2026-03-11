@@ -44,8 +44,7 @@ __all__ = ()
 class ContextPropertiesMeta(type):
     if TYPE_CHECKING:
 
-        def __getattribute__(self, name: str) -> Callable[[], Self]:
-            ...
+        def __getattribute__(self, name: str) -> Callable[[], ContextProperties]: ...
 
     def __new__(cls, name: str, bases: Tuple[type, ...], attrs: Dict[str, Any]):
         cls = super().__new__(cls, name, bases, attrs)
@@ -53,14 +52,14 @@ class ContextPropertiesMeta(type):
         sources = attrs.get('SOURCES', {})
 
         def build_location(location: str) -> classmethod:
-            def f(cls) -> Self:
+            def f(cls) -> ContextProperties:
                 data = {'location': location}
                 return cls(data)
 
             return classmethod(f)
 
         def build_source(source: str) -> classmethod:
-            def f(cls) -> Self:
+            def f(cls) -> ContextProperties:
                 data = {'source': source}
                 return cls(data)
 
@@ -103,6 +102,8 @@ class ContextProperties(metaclass=ContextPropertiesMeta):
         'Add Friends to DM': 'eyJsb2NhdGlvbiI6IkFkZCBGcmllbmRzIHRvIERNIn0=',
         'Group DM Invite Create': 'eyJsb2NhdGlvbiI6Ikdyb3VwIERNIEludml0ZSBDcmVhdGUifQ==',
         'Stage Channel': 'eyJsb2NhdGlvbiI6IlN0YWdlIENoYW5uZWwifQ==',
+        'chat_input': 'eyJsb2NhdGlvbiI6ImNoYXRfaW5wdXQifQ==',
+        'greet': 'eyJsb2NhdGlvbiI6ImdyZWV0In0=',
     }
 
     SOURCES = {

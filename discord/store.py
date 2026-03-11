@@ -70,6 +70,7 @@ if TYPE_CHECKING:
     from .guild import Guild
     from .library import LibraryApplication
     from .state import ConnectionState
+    from .metadata import MetadataObject
     from .types.application import StoreAsset as StoreAssetPayload
     from .types.entitlements import Gift as GiftPayload
     from .types.snowflake import Snowflake as SnowflakeType
@@ -710,7 +711,7 @@ class StoreListing(Hashable):
         self.child_skus: List[SKU] = [SKU(data=sku, state=state) for sku in data.get('child_skus', [])]
         self.alternative_skus: List[SKU] = [SKU(data=sku, state=state) for sku in data.get('alternative_skus', [])]
         self.entitlement_branch_id: Optional[int] = _get_as_snowflake(data, 'entitlement_branch_id')
-        self.guild: Optional[Guild] = state.create_guild(data['guild']) if 'guild' in data else None  # type: ignore
+        self.guild: Optional[Guild] = state.create_guild(data['guild']) if 'guild' in data else None
         self.published: bool = data.get('published', True)
         self.published_at: Optional[datetime] = parse_time(data['published_at']) if 'published_at' in data else None
         self.unpublished_at: Optional[datetime] = parse_time(data['unpublished_at']) if 'unpublished_at' in data else None
@@ -891,6 +892,22 @@ class StoreListing(Hashable):
 
         data = await self._state.http.edit_store_listing(self.id, payload)
         self._update(data, application=self.sku.application)
+
+    async def delete(self) -> None:
+        """|coro|
+
+        Deletes the store listing.
+
+        .. versionadded:: 2.1
+
+        Raises
+        ------
+        Forbidden
+            You do not have permissions to delete the store listing.
+        HTTPException
+            Deleting the store listing failed.
+        """
+        await self._state.http.delete_store_listing(self.id)
 
     @property
     def url(self) -> str:
@@ -1079,6 +1096,11 @@ class SKU(Hashable):
 
     .. versionadded:: 2.0
 
+    .. versionchanged:: 2.1
+
+        Removed the non-functional ``create_discount()``
+        and ``delete_discount()`` methods.
+
     Attributes
     -----------
     id: :class:`int`
@@ -1140,8 +1162,12 @@ class SKU(Hashable):
         The system requirements of the SKU by operating system, if any.
     release_date: Optional[:class:`datetime.date`]
         The date that the SKU will released, if any.
-    preorder_release_date: Optional[:class:`datetime.date`]
+    preorder_release_date: Optional[:class:`str`]
         The approximate date that the SKU will released for pre-order, if any.
+
+        .. versionchanged:: 2.1
+
+            Corrected type from :class:`datetime.date` to :class:`str`.
     preorder_released_at: Optional[:class:`datetime.datetime`]
         The date that the SKU was released for pre-order, if any.
     external_purchase_url: Optional[:class:`str`]
@@ -1149,7 +1175,7 @@ class SKU(Hashable):
     premium: :class:`bool`
         Whether this SKU is provided for free to premium users.
     restricted: :class:`bool`
-        Whether this SKU is restricted.
+        Whether this SKU is restricted in the user's region.
     exclusive: :class:`bool`
         Whether this SKU is exclusive to Discord.
     deleted: :class:`bool`
@@ -1279,7 +1305,7 @@ class SKU(Hashable):
         self.genres: List[SKUGenre] = [try_enum(SKUGenre, genre) for genre in data.get('genres', [])]
         self.available_regions: Optional[List[str]] = data.get('available_regions')
         self.content_ratings: List[ContentRating] = (
-            [ContentRating.from_dict(data['content_rating'], data['content_rating_agency'])]  # type: ignore
+            [ContentRating.from_dict(data['content_rating'], data['content_rating_agency'])]
             if 'content_rating' in data and 'content_rating_agency' in data
             else ContentRating.from_dicts(data.get('content_ratings'))
         )
@@ -1289,7 +1315,7 @@ class SKU(Hashable):
         ]
 
         self.release_date: Optional[date] = parse_date(data.get('release_date'))
-        self.preorder_release_date: Optional[date] = parse_date(data.get('preorder_approximate_release_date'))
+        self.preorder_release_date: Optional[str] = data.get('preorder_approximate_release_date')
         self.preorder_released_at: Optional[datetime] = parse_time(data.get('preorder_release_at'))
         self.external_purchase_url: Optional[str] = data.get('external_purchase_url')
 
@@ -1470,7 +1496,7 @@ class SKU(Hashable):
         if flags is not MISSING:
             payload['flags'] = flags.value if flags else 0
         if access_level is not MISSING:
-            payload['access_level'] = int(access_level)
+            payload['access_type'] = int(access_level)
         if locales is not MISSING:
             payload['locales'] = [str(l) for l in locales] if locales else []
         if features is not MISSING:
@@ -1496,7 +1522,7 @@ class SKU(Hashable):
         if manifest_labels is not MISSING:
             payload['manifest_labels'] = [m.id for m in manifest_labels] if manifest_labels else []
 
-        data = await self._state.http.edit_sku(self.id, **payload)
+        data = await self._state.http.edit_sku(self.id, payload)
         self._update(data)
 
     async def subscription_plans(
@@ -1689,54 +1715,6 @@ class SKU(Hashable):
         data = await self._state.http.create_store_listing(self.application_id, self.id, payload)
         return StoreListing(data=data, state=self._state, application=self.application)
 
-    async def create_discount(self, user: Snowflake, percent_off: int, *, ttl: int = 3600) -> None:
-        """|coro|
-
-        Creates a discount for this SKU for a user.
-
-        This discount will be applied to the user's next purchase of this SKU.
-
-        Parameters
-        ----------
-        user: :class:`User`
-            The user to create the discount for.
-        percent_off: :class:`int`
-            The discount in the form of a percentage off the price to give the user.
-        ttl: :class:`int`
-            How long the discount should last for in seconds.
-            Minimum 60 seconds, maximum 3600 seconds.
-
-        Raises
-        ------
-        Forbidden
-            You do not have permissions to create the discount.
-        HTTPException
-            Creating the discount failed.
-        """
-        await self._state.http.create_sku_discount(self.id, user.id, percent_off, ttl)
-
-    async def delete_discount(self, user: Snowflake) -> None:
-        """|coro|
-
-        Deletes a discount for this SKU for a user.
-
-        You do not need to call this after a discounted purchase has been made,
-        as the discount will be automatically consumed and deleted.
-
-        Parameters
-        ----------
-        user: :class:`User`
-            The user to delete the discount for.
-
-        Raises
-        ------
-        Forbidden
-            You do not have permissions to delete the discount.
-        HTTPException
-            Deleting the discount failed.
-        """
-        await self._state.http.delete_sku_discount(self.id, user.id)
-
     async def create_gift_batch(
         self,
         *,
@@ -1854,20 +1832,38 @@ class SKU(Hashable):
         return Gift(data=data, state=state)
 
     async def preview_purchase(
-        self, payment_source: Snowflake, *, subscription_plan: Optional[Snowflake] = None, test_mode: bool = False
+        self,
+        payment_source: Optional[Snowflake] = None,
+        *,
+        subscription_plan: Optional[Snowflake] = None,
+        currency: Optional[str] = None,
+        test_mode: bool = False,
+        gift: bool = False,
     ) -> SKUPrice:
         """|coro|
 
         Previews a purchase of this SKU.
 
+        .. versionchanged:: 2.1
+
+            Made ``payment_source`` optional.
+
         Parameters
         ----------
-        payment_source: :class:`PaymentSource`
+        payment_source: Optional[:class:`PaymentSource`]
             The payment source to use for the purchase.
         subscription_plan: Optional[:class:`SubscriptionPlan`]
             The subscription plan being purchased.
+        currency: Optional[:class:`str`]
+            The currency to use for the purchase.
+
+            .. versionadded:: 2.1
         test_mode: :class:`bool`
             Whether to preview the purchase in test mode.
+        gift: :class:`bool`
+            Whether the purchase is a gift.
+
+            .. versionadded:: 2.1
 
         Raises
         ------
@@ -1880,7 +1876,12 @@ class SKU(Hashable):
             The previewed purchase price.
         """
         data = await self._state.http.preview_sku_purchase(
-            self.id, payment_source.id, subscription_plan.id if subscription_plan else None, test_mode=test_mode
+            self.id,
+            payment_source.id if payment_source else None,
+            subscription_plan.id if subscription_plan else None,
+            currency=currency,
+            test_mode=test_mode,
+            gift=gift,
         )
         return SKUPrice(data=data)
 
@@ -1897,7 +1898,7 @@ class SKU(Hashable):
         payment_source_token: Optional[str] = None,
         purchase_token: Optional[str] = None,
         return_url: Optional[str] = None,
-        gateway_checkout_context: Optional[str] = None,
+        gateway_checkout_context: Optional[MetadataObject] = None,
     ) -> Tuple[List[Entitlement], List[LibraryApplication], Optional[Gift]]:
         """|coro|
 
@@ -1936,7 +1937,7 @@ class SKU(Hashable):
             The purchase token to use.
         return_url: Optional[:class:`str`]
             The URL to return to after the payment is complete.
-        gateway_checkout_context: Optional[:class:`str`]
+        gateway_checkout_context: Optional[Dict[:class:`str`, Any]]
             The current checkout context.
 
         Raises
@@ -2051,6 +2052,10 @@ class SubscriptionPlan(Hashable):
 
     .. versionadded:: 2.0
 
+    .. versionchanged:: 2.1
+
+        Removed ``discount_price``, ``fallback_currency``, ``fallback_price``, and ``fallback_discount_price`` due to an API change.
+
     Attributes
     ----------
     id: :class:`int`
@@ -2074,25 +2079,7 @@ class SubscriptionPlan(Hashable):
     price: Optional[:class:`int`]
         The price of the subscription plan.
         Not available in some contexts.
-    discount_price: Optional[:class:`int`]
-        The discounted price of the subscription plan.
-        This price is the one premium subscribers will pay, and is only available for premium subscribers.
-    fallback_currency: Optional[:class:`str`]
-        The fallback currency of the subscription plan's price.
-        This is the currency that will be used for gifting if the user's currency is not giftable.
-    fallback_price: Optional[:class:`int`]
-        The fallback price of the subscription plan.
-        This is the price that will be used for gifting if the user's currency is not giftable.
-    fallback_discount_price: Optional[:class:`int`]
-        The fallback discounted price of the subscription plan.
-        This is the discounted price that will be used for gifting if the user's currency is not giftable.
     """
-
-    _INTERVAL_TABLE = {
-        SubscriptionInterval.day: 1,
-        SubscriptionInterval.month: 30,
-        SubscriptionInterval.year: 365,
-    }
 
     __slots__ = (
         'id',
@@ -2105,10 +2092,6 @@ class SubscriptionPlan(Hashable):
         'currency',
         'price_tier',
         'price',
-        'discount_price',
-        'fallback_currency',
-        'fallback_price',
-        'fallback_discount_price',
         '_state',
     )
 
@@ -2133,10 +2116,6 @@ class SubscriptionPlan(Hashable):
         self.currency: Optional[str] = data.get('currency')
         self.price_tier: Optional[int] = data.get('price_tier')
         self.price: Optional[int] = data.get('price')
-        self.discount_price: Optional[int] = data.get('discount_price')
-        self.fallback_currency: Optional[str] = data.get('fallback_currency')
-        self.fallback_price: Optional[int] = data.get('fallback_price')
-        self.fallback_discount_price: Optional[int] = data.get('fallback_discount_price')
 
     def __repr__(self) -> str:
         return f'<SubscriptionPlan id={self.id} name={self.name!r} sku_id={self.sku_id} interval={self.interval!r} interval_count={self.interval_count}>'
@@ -2147,12 +2126,31 @@ class SubscriptionPlan(Hashable):
     @property
     def duration(self) -> timedelta:
         """:class:`datetime.timedelta`: How long the subscription plan lasts."""
-        return timedelta(days=self.interval_count * self._INTERVAL_TABLE[self.interval])
+        return timedelta(days=self.interval_count * self.interval.duration)
 
     @property
     def premium_type(self) -> Optional[PremiumType]:
         """Optional[:class:`PremiumType`]: The premium type of the subscription plan, if it is a premium subscription."""
         return PremiumType.from_sku_id(self.sku_id)
+
+    def get_price(self, context: SubscriptionPlanPurchaseType, /) -> SubscriptionPlanPrices:
+        """Returns the price of the subscription plan for a specific purchase context.
+        Falls back to the default price if no specific price is set for the context.
+
+        .. versionadded:: 2.1
+
+        Parameters
+        ----------
+        context: :class:`SubscriptionPlanPurchaseType`
+            The purchase context to get the price for.
+
+
+        Returns
+        -------
+        :class:`SubscriptionPlanPrices`
+            The price of the subscription plan for the given context.
+        """
+        return self.prices.get(context, self.prices[SubscriptionPlanPurchaseType.default])
 
     async def gifts(self) -> List[Gift]:
         """|coro|
@@ -2208,17 +2206,36 @@ class SubscriptionPlan(Hashable):
         )
         return Gift(data=data, state=state)
 
-    async def preview_purchase(self, payment_source: Snowflake, *, test_mode: bool = False) -> SKUPrice:
+    async def preview_purchase(
+        self,
+        payment_source: Optional[Snowflake] = None,
+        *,
+        currency: Optional[str] = None,
+        test_mode: bool = False,
+        gift: bool = False,
+    ) -> SKUPrice:
         """|coro|
 
         Previews a purchase of this subscription plan.
 
+        .. versionchanged:: 2.1
+
+            Made ``payment_source`` optional.
+
         Parameters
         ----------
-        payment_source: :class:`PaymentSource`
+        payment_source: Optional[:class:`PaymentSource`]
             The payment source to use for the purchase.
+        currency: Optional[:class:`str`]
+            The currency to use for the purchase.
+
+            .. versionadded:: 2.1
         test_mode: :class:`bool`
             Whether to preview the purchase in test mode.
+        gift: :class:`bool`
+            Whether the purchase is a gift.
+
+            .. versionadded:: 2.1
 
         Raises
         ------
@@ -2230,7 +2247,14 @@ class SubscriptionPlan(Hashable):
         :class:`SKUPrice`
             The previewed purchase price.
         """
-        data = await self._state.http.preview_sku_purchase(self.id, payment_source.id, self.id, test_mode=test_mode)
+        data = await self._state.http.preview_sku_purchase(
+            self.id,
+            payment_source.id if payment_source else None,
+            self.id,
+            currency=currency,
+            test_mode=test_mode,
+            gift=gift,
+        )
         return SKUPrice(data=data)
 
     async def purchase(
@@ -2245,7 +2269,7 @@ class SubscriptionPlan(Hashable):
         payment_source_token: Optional[str] = None,
         purchase_token: Optional[str] = None,
         return_url: Optional[str] = None,
-        gateway_checkout_context: Optional[str] = None,
+        gateway_checkout_context: Optional[MetadataObject] = None,
     ) -> Tuple[List[Entitlement], List[LibraryApplication], Optional[Gift]]:
         """|coro|
 
@@ -2283,7 +2307,7 @@ class SubscriptionPlan(Hashable):
             The purchase token to use.
         return_url: Optional[:class:`str`]
             The URL to return to after the payment is complete.
-        gateway_checkout_context: Optional[:class:`str`]
+        gateway_checkout_context: Optional[Dict[:class:`str`, Any]]
             The current checkout context.
 
         Raises

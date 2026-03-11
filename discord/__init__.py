@@ -12,7 +12,7 @@ __title__ = 'discord.py-self'
 __author__ = 'Dolfies'
 __license__ = 'MIT'
 __copyright__ = 'Copyright 2015-present Rapptz and 2021-present Dolfies'
-__version__ = '2.1.0a'
+__version__ = '2.2.0a'
 
 __path__ = __import__('pkgutil').extend_path(__path__, __name__)
 
@@ -30,6 +30,7 @@ from .billing import *
 from .calls import *
 from .channel import *
 from .client import *
+from .collectible import *
 from .colour import *
 from .commands import *
 from .components import *
@@ -56,11 +57,13 @@ from .metadata import *
 from .modal import *
 from .object import *
 from .oauth2 import *
+from .onboarding import *
 from .partial_emoji import *
 from .payments import *
 from .permissions import *
 from .player import *
 from .poll import *
+from .primary_guild import *
 from .profile import *
 from .promotions import *
 from .raw_models import *
@@ -93,7 +96,7 @@ class _VersionInfo(NamedTuple):
     serial: int
 
 
-version_info: _VersionInfo = _VersionInfo(major=2, minor=1, micro=0, releaselevel='alpha', serial=0)
+version_info: _VersionInfo = _VersionInfo(major=2, minor=2, micro=0, releaselevel='alpha', serial=0)
 
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 

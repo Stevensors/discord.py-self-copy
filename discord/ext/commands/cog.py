@@ -21,15 +21,26 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 """
+
 from __future__ import annotations
 
 import inspect
 import logging
 from discord.utils import maybe_coroutine, MISSING
 
-from typing import Any, Callable, Dict, Generator, List, Optional, TYPE_CHECKING, Tuple, TypeVar
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generator,
+    List,
+    Optional,
+    TYPE_CHECKING,
+    Tuple,
+    TypeVar,
+)
 
-from ._types import _BaseCommand, BotT
+from ._types import _BaseCommand, BotT, MaybeCoro
 
 if TYPE_CHECKING:
     from typing_extensions import Self
@@ -37,6 +48,7 @@ if TYPE_CHECKING:
     from .bot import BotBase
     from .context import Context
     from .core import Command
+
 
 __all__ = (
     'CogMeta',
@@ -113,7 +125,7 @@ class CogMeta(type):
     __cog_commands__: List[Command[Any, ..., Any]]
     __cog_listeners__: List[Tuple[str, str]]
 
-    def __new__(cls, *args: Any, **kwargs: Any) -> Self:
+    def __new__(cls, *args: Any, **kwargs: Any) -> CogMeta:
         name, bases, attrs = args
         attrs['__cog_name__'] = kwargs.get('name', name)
         attrs['__cog_settings__'] = kwargs.pop('command_attrs', {})
@@ -365,7 +377,7 @@ class Cog(metaclass=CogMeta):
         pass
 
     @_cog_special_method
-    def bot_check_once(self, ctx: Context[BotT]) -> bool:
+    def bot_check_once(self, ctx: Context[BotT]) -> MaybeCoro[bool]:
         """A special method that registers as a :meth:`.Bot.check_once`
         check.
 
@@ -375,7 +387,7 @@ class Cog(metaclass=CogMeta):
         return True
 
     @_cog_special_method
-    def bot_check(self, ctx: Context[BotT]) -> bool:
+    def bot_check(self, ctx: Context[BotT]) -> MaybeCoro[bool]:
         """A special method that registers as a :meth:`.Bot.check`
         check.
 
@@ -385,7 +397,7 @@ class Cog(metaclass=CogMeta):
         return True
 
     @_cog_special_method
-    def cog_check(self, ctx: Context[BotT]) -> bool:
+    def cog_check(self, ctx: Context[BotT]) -> MaybeCoro[bool]:
         """A special method that registers as a :func:`~discord.ext.commands.check`
         for every command and subcommand in this cog.
 
@@ -464,7 +476,7 @@ class Cog(metaclass=CogMeta):
             command.cog = self
             if command.parent is None:
                 try:
-                    bot.add_command(command)  # type: ignore
+                    bot.add_command(command)
                 except Exception as e:
                     # undo our additions
                     for to_undo in self.__cog_commands__[:index]:

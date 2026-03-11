@@ -39,6 +39,7 @@ from typing import (
     Sequence,
     Tuple,
     TypeVar,
+    TypedDict,
     Union,
     overload,
 )
@@ -88,7 +89,7 @@ __all__ = (
 )
 
 if TYPE_CHECKING:
-    from typing_extensions import Self
+    from typing_extensions import Self, Unpack
 
     from .types.threads import ThreadArchiveDuration
     from .client import Client
@@ -103,7 +104,7 @@ if TYPE_CHECKING:
     from .sticker import GuildSticker, StickerItem
     from .file import File
     from .user import BaseUser, ClientUser, User
-    from .guild import Guild, GuildChannel as GuildChannelType
+    from .guild import Guild, GuildChannel as GuildChannelType, UserGuild
     from .settings import ChannelSettings
     from .read_state import ReadState
     from .types.channel import (
@@ -124,6 +125,48 @@ if TYPE_CHECKING:
     from .types.snowflake import SnowflakeList
 
     OverwriteKeyT = TypeVar('OverwriteKeyT', Role, BaseUser, Object, Union[Role, Member, Object])
+
+    class _BaseCreateChannelOptions(TypedDict, total=False):
+        reason: Optional[str]
+        position: int
+
+    class _CreateDirectoryChannelOptions(_BaseCreateChannelOptions, total=False):
+        topic: str
+        overwrites: Mapping[Union[Role, Member, Object], PermissionOverwrite]
+
+    class _CreateTextChannelOptions(_BaseCreateChannelOptions, total=False):
+        topic: str
+        slowmode_delay: int
+        nsfw: bool
+        overwrites: Mapping[Union[Role, Member, Object], PermissionOverwrite]
+        default_auto_archive_duration: int
+        default_thread_slowmode_delay: int
+
+    class _CreateVoiceChannelOptions(_BaseCreateChannelOptions, total=False):
+        bitrate: int
+        user_limit: int
+        rtc_region: Optional[str]
+        video_quality_mode: VideoQualityMode
+        overwrites: Mapping[Union[Role, Member, Object], PermissionOverwrite]
+
+    class _CreateStageChannelOptions(_CreateVoiceChannelOptions, total=False):
+        bitrate: int
+        user_limit: int
+        rtc_region: Optional[str]
+        video_quality_mode: VideoQualityMode
+        overwrites: Mapping[Union[Role, Member, Object], PermissionOverwrite]
+
+    class _CreateForumChannelOptions(_CreateTextChannelOptions, total=False):
+        topic: str
+        slowmode_delay: int
+        nsfw: bool
+        overwrites: Mapping[Union[Role, Member, Object], PermissionOverwrite]
+        default_auto_archive_duration: int
+        default_thread_slowmode_delay: int
+        default_sort_order: ForumOrderType
+        default_reaction_emoji: EmojiInputType
+        default_layout: ForumLayoutType
+        available_tags: Sequence[ForumTag]
 
 
 class ThreadWithMessage(NamedTuple):
@@ -383,12 +426,10 @@ class TextChannel(discord.abc.Messageable, discord.abc.GuildChannel, Hashable):
         return self.read_state.last_viewed  # type: ignore
 
     @overload
-    async def edit(self) -> Optional[TextChannel]:
-        ...
+    async def edit(self) -> Optional[TextChannel]: ...
 
     @overload
-    async def edit(self, *, position: int, reason: Optional[str] = ...) -> None:
-        ...
+    async def edit(self, *, position: int, reason: Optional[str] = ...) -> None: ...
 
     @overload
     async def edit(
@@ -406,8 +447,7 @@ class TextChannel(discord.abc.Messageable, discord.abc.GuildChannel, Hashable):
         default_thread_slowmode_delay: int = ...,
         type: ChannelType = ...,
         overwrites: Mapping[OverwriteKeyT, PermissionOverwrite] = ...,
-    ) -> TextChannel:
-        ...
+    ) -> TextChannel: ...
 
     async def edit(self, *, reason: Optional[str] = None, **options: Any) -> Optional[TextChannel]:
         """|coro|
@@ -1514,12 +1554,10 @@ class VoiceChannel(VocalGuildChannel):
         )
 
     @overload
-    async def edit(self) -> None:
-        ...
+    async def edit(self) -> None: ...
 
     @overload
-    async def edit(self, *, position: int, reason: Optional[str] = ...) -> None:
-        ...
+    async def edit(self, *, position: int, reason: Optional[str] = ...) -> None: ...
 
     @overload
     async def edit(
@@ -1538,8 +1576,7 @@ class VoiceChannel(VocalGuildChannel):
         slowmode_delay: int = ...,
         status: Optional[str] = ...,
         reason: Optional[str] = ...,
-    ) -> VoiceChannel:
-        ...
+    ) -> VoiceChannel: ...
 
     async def edit(self, *, reason: Optional[str] = None, **options: Any) -> Optional[VoiceChannel]:
         """|coro|
@@ -1859,12 +1896,10 @@ class StageChannel(VocalGuildChannel):
         return StageInstance(guild=self.guild, state=self._state, data=data)
 
     @overload
-    async def edit(self) -> None:
-        ...
+    async def edit(self) -> None: ...
 
     @overload
-    async def edit(self, *, position: int, reason: Optional[str] = ...) -> None:
-        ...
+    async def edit(self, *, position: int, reason: Optional[str] = ...) -> None: ...
 
     @overload
     async def edit(
@@ -1882,8 +1917,7 @@ class StageChannel(VocalGuildChannel):
         video_quality_mode: VideoQualityMode = ...,
         slowmode_delay: int = ...,
         reason: Optional[str] = ...,
-    ) -> StageChannel:
-        ...
+    ) -> StageChannel: ...
 
     async def edit(self, *, reason: Optional[str] = None, **options: Any) -> Optional[StageChannel]:
         """|coro|
@@ -2049,12 +2083,10 @@ class CategoryChannel(discord.abc.GuildChannel, Hashable):
         return await self._clone_impl({'nsfw': self.nsfw}, name=name, reason=reason)
 
     @overload
-    async def edit(self) -> None:
-        ...
+    async def edit(self) -> None: ...
 
     @overload
-    async def edit(self, *, position: int, reason: Optional[str] = ...) -> None:
-        ...
+    async def edit(self, *, position: int, reason: Optional[str] = ...) -> None: ...
 
     @overload
     async def edit(
@@ -2065,8 +2097,7 @@ class CategoryChannel(discord.abc.GuildChannel, Hashable):
         nsfw: bool = ...,
         overwrites: Mapping[OverwriteKeyT, PermissionOverwrite] = ...,
         reason: Optional[str] = ...,
-    ) -> CategoryChannel:
-        ...
+    ) -> CategoryChannel: ...
 
     async def edit(self, *, reason: Optional[str] = None, **options: Any) -> Optional[CategoryChannel]:
         """|coro|
@@ -2195,7 +2226,7 @@ class CategoryChannel(discord.abc.GuildChannel, Hashable):
         """
         return self.directory_channels
 
-    async def create_text_channel(self, name: str, **options: Any) -> TextChannel:
+    async def create_text_channel(self, name: str, **options: Unpack[_CreateTextChannelOptions]) -> TextChannel:
         """|coro|
 
         A shortcut method to :meth:`Guild.create_text_channel` to create a :class:`TextChannel` in the category.
@@ -2207,7 +2238,7 @@ class CategoryChannel(discord.abc.GuildChannel, Hashable):
         """
         return await self.guild.create_text_channel(name, category=self, **options)
 
-    async def create_voice_channel(self, name: str, **options: Any) -> VoiceChannel:
+    async def create_voice_channel(self, name: str, **options: Unpack[_CreateVoiceChannelOptions]) -> VoiceChannel:
         """|coro|
 
         A shortcut method to :meth:`Guild.create_voice_channel` to create a :class:`VoiceChannel` in the category.
@@ -2219,7 +2250,7 @@ class CategoryChannel(discord.abc.GuildChannel, Hashable):
         """
         return await self.guild.create_voice_channel(name, category=self, **options)
 
-    async def create_stage_channel(self, name: str, **options: Any) -> StageChannel:
+    async def create_stage_channel(self, name: str, **options: Unpack[_CreateStageChannelOptions]) -> StageChannel:
         """|coro|
 
         A shortcut method to :meth:`Guild.create_stage_channel` to create a :class:`StageChannel` in the category.
@@ -2233,7 +2264,7 @@ class CategoryChannel(discord.abc.GuildChannel, Hashable):
         """
         return await self.guild.create_stage_channel(name, category=self, **options)
 
-    async def create_directory(self, name: str, **options: Any) -> DirectoryChannel:
+    async def create_directory(self, name: str, **options: Unpack[_CreateDirectoryChannelOptions]) -> DirectoryChannel:
         """|coro|
 
         A shortcut method to :meth:`Guild.create_directory` to create a :class:`DirectoryChannel` in the category.
@@ -2249,7 +2280,7 @@ class CategoryChannel(discord.abc.GuildChannel, Hashable):
 
     create_directory_channel = create_directory
 
-    async def create_forum(self, name: str, **options: Any) -> ForumChannel:
+    async def create_forum(self, name: str, **options: Unpack[_CreateForumChannelOptions]) -> ForumChannel:
         """|coro|
 
         A shortcut method to :meth:`Guild.create_forum` to create a :class:`ForumChannel` in the category.
@@ -2700,12 +2731,10 @@ class ForumChannel(discord.abc.GuildChannel, Hashable):
         )
 
     @overload
-    async def edit(self) -> None:
-        ...
+    async def edit(self) -> None: ...
 
     @overload
-    async def edit(self, *, position: int, reason: Optional[str] = ...) -> None:
-        ...
+    async def edit(self, *, position: int, reason: Optional[str] = ...) -> None: ...
 
     @overload
     async def edit(
@@ -2728,8 +2757,7 @@ class ForumChannel(discord.abc.GuildChannel, Hashable):
         default_layout: ForumLayoutType = ...,
         default_sort_order: ForumOrderType = ...,
         require_tag: bool = ...,
-    ) -> ForumChannel:
-        ...
+    ) -> ForumChannel: ...
 
     async def edit(self, *, reason: Optional[str] = None, **options: Any) -> Optional[ForumChannel]:
         """|coro|
@@ -2922,6 +2950,7 @@ class ForumChannel(discord.abc.GuildChannel, Hashable):
         mention_author: bool = MISSING,
         applied_tags: Sequence[ForumTag] = MISSING,
         suppress_embeds: bool = False,
+        silent: bool = False,
         reason: Optional[str] = None,
     ) -> ThreadWithMessage:
         """|coro|
@@ -2970,6 +2999,11 @@ class ForumChannel(discord.abc.GuildChannel, Hashable):
             A list of stickers to upload. Must be a maximum of 3.
         suppress_embeds: :class:`bool`
             Whether to suppress embeds for the message. This sends the message without any embeds if set to ``True``.
+        silent: :class:`bool`
+            Whether to suppress push and desktop notifications for the message. This will increment the mention counter
+            in the UI, but will not actually send a notification.
+
+            .. versionadded:: 2.1
         reason: :class:`str`
             The reason for creating a new thread. Shows up on the audit log.
 
@@ -2999,8 +3033,10 @@ class ForumChannel(discord.abc.GuildChannel, Hashable):
         else:
             sticker_ids: SnowflakeList = [s.id for s in stickers]
 
-        if suppress_embeds:
-            flags = MessageFlags._from_value(4)
+        if suppress_embeds or silent:
+            flags = MessageFlags._from_value(0)
+            flags.suppress_embeds = suppress_embeds
+            flags.suppress_notifications = silent
         else:
             flags = MISSING
 
@@ -3296,12 +3332,10 @@ class DirectoryChannel(discord.abc.GuildChannel, Hashable):
         return self.read_state.last_viewed  # type: ignore
 
     @overload
-    async def edit(self) -> Optional[DirectoryChannel]:
-        ...
+    async def edit(self) -> Optional[DirectoryChannel]: ...
 
     @overload
-    async def edit(self, *, position: int, reason: Optional[str] = ...) -> None:
-        ...
+    async def edit(self, *, position: int, reason: Optional[str] = ...) -> None: ...
 
     @overload
     async def edit(
@@ -3314,8 +3348,7 @@ class DirectoryChannel(discord.abc.GuildChannel, Hashable):
         sync_permissions: bool = ...,
         category: Optional[CategoryChannel] = ...,
         overwrites: Mapping[OverwriteKeyT, PermissionOverwrite] = ...,
-    ) -> DirectoryChannel:
-        ...
+    ) -> DirectoryChannel: ...
 
     async def edit(self, *, reason: Optional[str] = None, **options: Any) -> Optional[DirectoryChannel]:
         """|coro|
@@ -3370,7 +3403,7 @@ class DirectoryChannel(discord.abc.GuildChannel, Hashable):
     async def clone(self, *, name: Optional[str] = None, reason: Optional[str] = None) -> DirectoryChannel:
         return await self._clone_impl({'topic': self.topic}, name=name, reason=reason)
 
-    async def counts(self) -> Dict[DirectoryCategory, int]:
+    async def counts(self) -> Mapping[DirectoryCategory, int]:
         """|coro|
 
         Gets the number of entries in each category.
@@ -3393,12 +3426,19 @@ class DirectoryChannel(discord.abc.GuildChannel, Hashable):
     async def entries(
         self,
         *,
-        type: Optional[DirectoryEntryType] = None,
-        category: Optional[DirectoryCategory] = None,
+        type: DirectoryEntryType = MISSING,
+        category: DirectoryCategory = MISSING,
     ) -> List[DirectoryEntry]:
         """|coro|
 
         Gets the directory entries in this channel.
+
+        Parameters
+        -----------
+        type: :class:`DirectoryEntryType`
+            The type of entries to get. Defaults to all types.
+        category: :class:`DirectoryCategory`
+            The category of entries to get. Defaults to all categories.
 
         Raises
         -------
@@ -3418,6 +3458,32 @@ class DirectoryChannel(discord.abc.GuildChannel, Hashable):
         )
         return [DirectoryEntry(state=state, data=e, channel=self) for e in data]
 
+    async def fetch_entry(self, entity_id: int) -> DirectoryEntry:
+        """|coro|
+
+        Gets a directory entry by its ID.
+
+        Parameters
+        -----------
+        entity_id: :class:`int`
+            The ID of the entry to fetch.
+
+        Raises
+        -------
+        Forbidden
+            You don't have permissions to get the entry.
+        HTTPException
+            Getting the entry failed.
+
+        Returns
+        --------
+        :class:`DirectoryEntry`
+            The entry in this channel.
+        """
+        state = self._state
+        data = await state.http.get_directory_entry(self.id, entity_id)
+        return DirectoryEntry(state=state, data=data, channel=self)
+
     async def fetch_entries(self, *entity_ids: int) -> List[DirectoryEntry]:
         r"""|coro|
 
@@ -3425,7 +3491,8 @@ class DirectoryChannel(discord.abc.GuildChannel, Hashable):
 
         .. note::
 
-            These :class:`DirectoryEntry` objects do not have :attr:`DirectoryEntry.guild`.
+            These :class:`DirectoryEntry` objects do not have
+            :attr:`DirectoryEntry.guild` or :attr:`DirectoryEntry.scheduled_event`.
 
         Parameters
         -----------
@@ -3456,7 +3523,7 @@ class DirectoryChannel(discord.abc.GuildChannel, Hashable):
         query: str,
         /,
         *,
-        category: Optional[DirectoryCategory] = None,
+        category: DirectoryCategory = MISSING,
     ) -> List[DirectoryEntry]:
         """|coro|
 
@@ -3466,6 +3533,8 @@ class DirectoryChannel(discord.abc.GuildChannel, Hashable):
         -----------
         query: :class:`str`
             The query to search for.
+        category: :class:`DirectoryCategory`
+            The category to search in. Defaults to all categories.
 
         Raises
         -------
@@ -4617,7 +4686,7 @@ class PartialMessageable(discord.abc.Messageable, Hashable):
         return self
 
     @classmethod
-    def _from_webhook_channel(cls, guild: Guild, channel: WebhookChannelPayload) -> Self:
+    def _from_webhook_channel(cls, guild: Union[Guild, UserGuild], channel: WebhookChannelPayload) -> Self:
         return cls(
             state=guild._state,
             id=int(channel['id']),

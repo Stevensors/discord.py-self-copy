@@ -30,7 +30,6 @@ from .sticker import GuildSticker
 from .snowflake import Snowflake
 from .channel import GuildChannel, StageInstance
 from .voice import VoiceState
-from .welcome_screen import WelcomeScreen
 from .activity import PartialPresenceUpdate
 from .role import Role
 from .member import MemberWithUser
@@ -87,8 +86,7 @@ class _GuildCounts(TypedDict):
     approximate_presence_count: int
 
 
-class GuildPreview(_GuildMedia, _GuildCounts):
-    ...
+class GuildPreview(_GuildMedia, _GuildCounts): ...
 
 
 class Guild(UnavailableGuild, _GuildMedia):
@@ -155,13 +153,12 @@ class InviteGuild(TypedDict):
     features: List[str]
     vanity_url_code: Optional[str]
     premium_subscription_count: NotRequired[int]
+    premium_tier: int
     nsfw: bool
     nsfw_level: NSFWLevel
-    welcome_screen: NotRequired[WelcomeScreen]
 
 
-class GuildWithCounts(Guild, _GuildCounts):
-    ...
+class GuildWithCounts(Guild, _GuildCounts): ...
 
 
 class GuildPrune(TypedDict):
@@ -175,8 +172,8 @@ class GuildMFALevel(TypedDict):
 class ChannelPositionUpdate(TypedDict):
     id: Snowflake
     position: Optional[int]
-    lock_permissions: Optional[bool]
-    parent_id: Optional[Snowflake]
+    lock_permissions: NotRequired[Optional[bool]]
+    parent_id: NotRequired[Optional[Snowflake]]
 
 
 class _RolePositionRequired(TypedDict):

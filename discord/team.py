@@ -146,7 +146,7 @@ class Team(Hashable):
                 }
                 self.members.append(TeamMember(self, self._state, member))
 
-        if 'payout_account_status' in data:
+        if data.get('payout_account_status'):
             self.payout_account_status = try_enum(PayoutAccountStatus, data.get('payout_account_status'))
         if 'stripe_connect_account_id' in data:
             self.stripe_connect_account_id = data.get('stripe_connect_account_id')
@@ -265,16 +265,13 @@ class Team(Hashable):
         return members
 
     @overload
-    async def invite_member(self, user: _UserTag, /) -> TeamMember:
-        ...
+    async def invite_member(self, user: _UserTag, /) -> TeamMember: ...
 
     @overload
-    async def invite_member(self, user: str, /) -> TeamMember:
-        ...
+    async def invite_member(self, user: str, /) -> TeamMember: ...
 
     @overload
-    async def invite_member(self, username: str, discriminator: str, /) -> TeamMember:
-        ...
+    async def invite_member(self, username: str, discriminator: str, /) -> TeamMember: ...
 
     async def invite_member(self, *args: Union[_UserTag, str]) -> TeamMember:
         """|coro|
@@ -509,6 +506,20 @@ class TeamMember(User):
         The membership state of the member (i.e. invited or accepted)
     permissions: List[:class:`str`]
         The permissions of the team member. This is always "*".
+    name: :class:`str`
+        The user's username.
+    id: :class:`int`
+        The user's unique ID.
+    discriminator: :class:`str`
+        The user's discriminator. This is a legacy concept that is no longer used.
+    global_name: Optional[:class:`str`]
+        The user's global nickname, taking precedence over the username in display.
+
+        .. versionadded:: 2.1
+    bot: :class:`bool`
+        Specifies if the user is a bot account.
+    system: :class:`bool`
+        Specifies if the user is a system user (i.e. represents Discord officially).
     """
 
     __slots__ = ('team', 'membership_state', 'permissions')

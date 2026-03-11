@@ -21,6 +21,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, List, Optional
@@ -115,7 +116,6 @@ class PartialConnection:
         self.type: ConnectionType = try_enum(ConnectionType, data['type'])
         self.verified: bool = data['verified']
         self.visible: bool = True  # If we have a partial connection, it's visible
-
         self.metadata: Optional[Metadata] = Metadata(data['metadata']) if 'metadata' in data else None
 
     @property
@@ -132,7 +132,7 @@ class PartialConnection:
         elif self.type == ConnectionType.reddit:
             return f'https://www.reddit.com/u/{self.name}'
         elif self.type == ConnectionType.twitter:
-            return f'https://twitter.com/{self.name}'
+            return f'https://x.com/{self.name}'
         elif self.type == ConnectionType.spotify:
             return f'https://open.spotify.com/user/{self.id}'
         elif self.type == ConnectionType.xbox:
@@ -145,6 +145,16 @@ class PartialConnection:
             return f'https://www.ebay.com/usr/{self.name}'
         elif self.type == ConnectionType.instagram:
             return f'https://www.instagram.com/{self.name}'
+        elif self.type == ConnectionType.domain:
+            return f'https://{self.name}/'
+        elif self.type == ConnectionType.mastodon:
+            return self.name
+        elif self.type == ConnectionType.bluesky:
+            return f'https://bsky.app/profile/{self.name.replace(":", "%3A")}'
+        elif self.type == ConnectionType.roblox:
+            return f'https://roblox.com/users/{self.id}/profile'
+        elif self.type == ConnectionType.bungie:
+            return f'https://www.bungie.net/en/Profile/254/{self.id}'
 
 
 class Connection(PartialConnection):
@@ -204,8 +214,8 @@ class Connection(PartialConnection):
     )
 
     def __init__(self, *, data: ConnectionPayload, state: ConnectionState):
-        self._update(data)
         self._state = state
+        self._update(data)
         self.access_token: Optional[str] = None
 
     def _update(self, data: ConnectionPayload):
@@ -219,7 +229,7 @@ class Connection(PartialConnection):
 
         # Only sometimes in the payload
         try:
-            self.access_token: Optional[str] = data['access_token']
+            self.access_token: Optional[str] = data['access_token']  # pyright: ignore[reportTypedDictNotRequiredAccess]
         except KeyError:
             pass
 
@@ -236,7 +246,7 @@ class Connection(PartialConnection):
         guild_id = int(guild_data['id'])
         guild = state._get_guild(guild_id)
         if guild is None:
-            guild = state.create_guild(guild_data)
+            guild = state.create_guild(guild_data)  # type: ignore
         return guild
 
     async def edit(
@@ -320,7 +330,7 @@ class Connection(PartialConnection):
 
         Retrieves a new access token for the connection.
         Only applicable for connections of type:attr:`ConnectionType.twitch`,
-        :attr:`ConnectionType.youtube`, and :attr:`ConnectionType.spotify`.
+        :attr:`ConnectionType.youtube`, :attr:`ConnectionType.spotify`, and :attr:`ConnectionType.amazon_music`.
 
         Raises
         ------

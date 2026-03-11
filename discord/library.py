@@ -31,10 +31,10 @@ from .entitlements import Entitlement
 from .enums import SKUType, try_enum
 from .flags import LibraryApplicationFlags
 from .mixins import Hashable
-from .utils import MISSING, _get_as_snowflake, find, parse_date, parse_time
+from .utils import MISSING, _get_as_snowflake, find, parse_time
 
 if TYPE_CHECKING:
-    from datetime import date, datetime
+    from datetime import datetime
 
     from .asset import Asset
     from .state import ConnectionState
@@ -73,8 +73,12 @@ class LibrarySKU(Hashable):
         The SKU's ID.
     type: :class:`SKUType`
         The type of the SKU.
-    preorder_release_date: Optional[:class:`datetime.date`]
+    preorder_release_date: Optional[:class:`str`]
         The approximate date that the SKU will released for pre-order, if any.
+
+        .. versionchanged:: 2.1
+
+            Corrected type from :class:`datetime.date` to :class:`str`.
     preorder_released_at: Optional[:class:`datetime.datetime`]
         The date that the SKU was released for pre-order, if any.
     premium: :class:`bool`
@@ -92,7 +96,7 @@ class LibrarySKU(Hashable):
     def __init__(self, data: PartialSKUPayload):
         self.id: int = int(data['id'])
         self.type: SKUType = try_enum(SKUType, data['type'])
-        self.preorder_release_date: Optional[date] = parse_date(data.get('preorder_approximate_release_date'))
+        self.preorder_release_date: Optional[str] = data.get('preorder_approximate_release_date')
         self.preorder_released_at: Optional[datetime] = parse_time(data.get('preorder_release_at'))
         self.premium: bool = data.get('premium', False)
 
@@ -227,7 +231,12 @@ class LibraryApplication:
         app = find(lambda a: _get_as_snowflake(a, 'application_id') == self.application.id, data)
         return ApplicationActivityStatistics(
             data=app
-            or {'application_id': self.application.id, 'total_duration': 0, 'last_played_at': '1970-01-01T00:00:00+00:00'},
+            or {
+                'application_id': self.application.id,
+                'total_duration': 0,
+                'last_played_at': '1970-01-01T00:00:00+00:00',
+                'first_played_at': None,
+            },
             state=state,
         )
 

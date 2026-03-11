@@ -143,7 +143,7 @@ class WidgetMember(BaseUser):
         The member's guild-specific nickname. Takes precedence over the global name.
     avatar: Optional[:class:`str`]
         The member's avatar hash.
-    activity: Optional[Union[:class:`BaseActivity`, :class:`Spotify`]]
+    activity: Optional[:class:`BaseActivity`]
         The member's activity.
     deafened: Optional[:class:`bool`]
         Whether the member is currently deafened.
@@ -184,18 +184,18 @@ class WidgetMember(BaseUser):
         self.suppress: Optional[bool] = data.get('suppress', False)
 
         try:
-            game = data['game']
+            game = data['game']  # pyright: ignore[reportTypedDictNotRequiredAccess]
         except KeyError:
             activity = None
         else:
-            activity = create_activity(game, state)
+            activity = create_activity(game, state, self.id)
 
         self.activity: Optional[Union[BaseActivity, Spotify]] = activity
 
         self.connected_channel: Optional[WidgetChannel] = connected_channel
 
     def __repr__(self) -> str:
-        return f"<WidgetMember name={self.name!r} global_name={self.global_name!r} bot={self.bot} nick={self.nick!r}>"
+        return f'<WidgetMember name={self.name!r} global_name={self.global_name!r} bot={self.bot} nick={self.nick!r}>'
 
     @property
     def display_name(self) -> str:
@@ -292,14 +292,16 @@ class Widget:
     @property
     def json_url(self) -> str:
         """:class:`str`: The JSON URL of the widget."""
-        return f"https://discord.com/api/guilds/{self.id}/widget.json"
+        return f'https://discord.com/api/guilds/{self.id}/widget.json'
 
     @property
     def invite_url(self) -> Optional[str]:
         """Optional[:class:`str`]: The invite URL for the guild, if available."""
         return self._invite
 
-    async def fetch_invite(self, *, with_counts: bool = True) -> Optional[Invite]:
+    async def fetch_invite(
+        self, *, with_counts: bool = True, with_expiration: bool = True, with_permissions: bool = True
+    ) -> Optional[Invite]:
         """|coro|
 
         Retrieves an :class:`Invite` from the widget's invite URL.
@@ -312,6 +314,20 @@ class Widget:
             Whether to include count information in the invite. This fills the
             :attr:`Invite.approximate_member_count` and :attr:`Invite.approximate_presence_count`
             fields.
+        with_expiration: :class:`bool`
+            Whether to include the expiration date of the invite. This fills the
+            :attr:`.Invite.expires_at` field.
+
+            .. versionadded:: 2.0
+
+            .. deprecated:: 2.1
+                This parameter is deprecated and will be removed in a future version as it is no
+                longer needed to fill the :attr:`.Invite.expires_at` field.
+        with_permissions: :class:`bool`
+            Whether to include permission information in the invite. This fills the
+            :attr:`Invite.is_nickname_changeable` field.
+
+            .. versionadded:: 2.1
 
         Returns
         --------
@@ -320,6 +336,8 @@ class Widget:
         """
         if self._invite:
             resolved = resolve_invite(self._invite)
-            data = await self._state.http.get_invite(resolved.code, with_counts=with_counts)
+            data = await self._state.http.get_invite(
+                resolved.code, with_counts=with_counts, with_permissions=with_permissions
+            )
             return Invite.from_incomplete(state=self._state, data=data)
         return None

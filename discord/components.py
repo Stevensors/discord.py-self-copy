@@ -201,7 +201,7 @@ class Button(Component):
         self.label: Optional[str] = data.get('label')
         self.emoji: Optional[PartialEmoji]
         try:
-            self.emoji = PartialEmoji.from_dict(data['emoji'])
+            self.emoji = PartialEmoji.from_dict(data['emoji'])  # pyright: ignore[reportTypedDictNotRequiredAccess]
         except KeyError:
             self.emoji = None
 
@@ -304,7 +304,7 @@ class SelectMenu(Component):
         """:class:`ComponentType`: The type of component."""
         return ComponentType.select
 
-    def to_dict(self, options: Optional[Tuple[SelectOption]] = None) -> SelectInteractionData:
+    def to_dict(self, options: Optional[Tuple[SelectOption, ...]] = None) -> SelectInteractionData:
         return {
             'component_type': self.type.value,
             'custom_id': self.custom_id,
@@ -417,7 +417,7 @@ class SelectOption:
     @classmethod
     def from_dict(cls, data: SelectOptionPayload) -> SelectOption:
         try:
-            emoji = PartialEmoji.from_dict(data['emoji'])
+            emoji = PartialEmoji.from_dict(data['emoji'])  # pyright: ignore[reportTypedDictNotRequiredAccess]
         except KeyError:
             emoji = None
 
@@ -541,28 +541,23 @@ class TextInput(Component):
 
 
 @overload
-def _component_factory(data: ActionRowPayload, message: Message = ...) -> ActionRow:
-    ...
+def _component_factory(data: ActionRowPayload, message: Message = ...) -> ActionRow: ...
 
 
 @overload
-def _component_factory(data: MessageChildComponent, message: Message = ...) -> Optional[MessageChildComponentType]:
-    ...
+def _component_factory(data: MessageChildComponent, message: Message = ...) -> Optional[MessageChildComponentType]: ...
 
 
 @overload
-def _component_factory(data: ModalChildComponent, message: Message = ...) -> Optional[TextInput]:
-    ...
+def _component_factory(data: ModalChildComponent, message: Message = ...) -> Optional[TextInput]: ...
 
 
 @overload
-def _component_factory(data: ActionRowChildComponent, message: Message = ...) -> Optional[ActionRowChildComponentType]:
-    ...
+def _component_factory(data: ActionRowChildComponent, message: Message = ...) -> Optional[ActionRowChildComponentType]: ...
 
 
 @overload
-def _component_factory(data: ComponentPayload, message: Message = ...) -> Optional[Component]:
-    ...
+def _component_factory(data: ComponentPayload, message: Message = ...) -> Optional[Component]: ...
 
 
 def _component_factory(data: ComponentPayload, message: Message = MISSING) -> Optional[Component]:

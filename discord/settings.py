@@ -137,12 +137,10 @@ class _ProtoSettings:
         return new
 
     @overload
-    def _get_guild(self, id: int, /, *, always_guild: Literal[True] = ...) -> Guild:
-        ...
+    def _get_guild(self, id: int, /, *, always_guild: Literal[True] = ...) -> Guild: ...
 
     @overload
-    def _get_guild(self, id: int, /, *, always_guild: Literal[False] = ...) -> Union[Guild, Object]:
-        ...
+    def _get_guild(self, id: int, /, *, always_guild: Literal[False] = ...) -> Union[Guild, Object]: ...
 
     def _get_guild(self, id: int, /, *, always_guild: bool = False) -> Union[Guild, Object]:
         id = int(id)
@@ -739,8 +737,7 @@ class UserSettings(_ProtoSettings):
         return not self.settings.communities.disable_home_auto_nav.value
 
     @overload
-    async def edit(self) -> Self:
-        ...
+    async def edit(self) -> Self: ...
 
     @overload
     async def edit(
@@ -819,8 +816,7 @@ class UserSettings(_ProtoSettings):
         user_audio_settings: Collection[AudioContext] = ...,
         stream_audio_settings: Collection[AudioContext] = ...,
         home_auto_navigation: bool = ...,
-    ) -> Self:
-        ...
+    ) -> Self: ...
 
     async def edit(self, *, require_version: Union[bool, int] = False, **kwargs: Any) -> Self:
         r"""|coro|
@@ -1136,7 +1132,9 @@ class UserSettings(_ProtoSettings):
         state = self._state
         require_version = self.data_version if require_version == True else require_version
         ret = await state.http.edit_proto_settings(1, self.dict_to_base64(payload), require_version or None)
-        return UserSettings(state, ret['settings'])
+        # TODO: What do we do with out of date settings here?
+
+        return self.__class__(state, ret['settings'])
 
 
 class GuildFolder:
@@ -1192,7 +1190,16 @@ class GuildFolder:
         self._guild_ids: List[int] = [guild.id for guild in guilds] if guilds else []
 
     def __str__(self) -> str:
-        return self.name or ', '.join(guild.name for guild in [guild for guild in self.guilds if isinstance(guild, Guild)])
+        if self.name:
+            return self.name
+
+        names = []
+        for guild in self.guilds:
+            name = getattr(guild, 'name', None)
+            if name:
+                names.append(name)
+
+        return ', '.join(names)
 
     def __repr__(self) -> str:
         return f'<GuildFolder id={self.id} name={self.name!r} guilds={self.guilds!r}>'
@@ -1476,7 +1483,14 @@ class GuildProgress:
 
     def copy(self) -> Self:
         """Returns a shallow copy of the progress settings."""
-        cls = self.__class__(self.guild_id, hub_progress=self.hub_progress, onboarding_progress=self.onboarding_progress, recents_dismissed_at=self.recents_dismissed_at, dismissed_contents=self.dismissed_contents, collapsed_channels=self.collapsed_channels)  # type: ignore
+        cls = self.__class__(
+            self.guild_id,
+            hub_progress=self.hub_progress,
+            onboarding_progress=self.onboarding_progress,
+            recents_dismissed_at=self.recents_dismissed_at,
+            dismissed_contents=self.dismissed_contents,
+            collapsed_channels=self.collapsed_channels,  # type: ignore
+        )
         cls._state = self._state
         return cls
 
@@ -1524,7 +1538,7 @@ class GuildProgress:
         self._dismissed_contents = self._pack_dismissed_contents(value)
 
     @property
-    def collapsed_channels(self) -> List[Union[GuildChannel, Object]]:
+    def collapsed_channels(self) -> Sequence[Union[GuildChannel, Object]]:
         """List[Union[:class:`abc.GuildChannel`, :class:`Object`]]: A list of guild channels that are collapsed in the inbox. Always :class:`Object` if state is not attached."""
         return list(map(self._get_channel, self._collapsed_channel_ids))
 
@@ -1740,7 +1754,7 @@ class LegacyUserSettings:
             else:
                 setattr(self, '_' + key, value)
 
-    async def edit(self, **kwargs) -> Self:
+    async def edit(self, **kwargs) -> LegacyUserSettings:
         """|coro|
 
         Edits the client user's settings.
@@ -2308,8 +2322,7 @@ class TrackingSettings:
         self.usage_statistics = data.get('usage_statistics', {}).get('consented', False)
 
     @overload
-    async def edit(self) -> None:
-        ...
+    async def edit(self) -> None: ...
 
     @overload
     async def edit(
@@ -2317,8 +2330,7 @@ class TrackingSettings:
         *,
         personalization: bool = ...,
         usage_statistics: bool = ...,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     async def edit(self, **kwargs) -> None:
         """|coro|
@@ -2394,8 +2406,7 @@ class EmailSettings:
         self.family_center_digest: bool = categories.get('family_center_digest', False)
 
     @overload
-    async def edit(self) -> None:
-        ...
+    async def edit(self) -> None: ...
 
     @overload
     async def edit(
@@ -2407,8 +2418,7 @@ class EmailSettings:
         recommendations_and_events: bool = MISSING,
         tips: bool = MISSING,
         updates_and_announcements: bool = MISSING,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     async def edit(self, **kwargs) -> None:
         """|coro|
