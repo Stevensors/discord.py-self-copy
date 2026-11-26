@@ -60,7 +60,8 @@ import curl_cffi
 from curl_cffi import requests, CurlMime
 
 from . import utils
-from .enums import InviteType, NetworkConnectionType, RelationshipAction
+from .components import ActionRow, Container, LabelComponent, SectionComponent
+from .enums import ComponentType, InviteType, NetworkConnectionType, RelationshipAction
 from .errors import (
     CaptchaRequired,
     DiscordServerError,
@@ -73,7 +74,7 @@ from .errors import (
 )
 from .file import File, _FileBase
 from .mentions import AllowedMentions
-from .tracking import ContextProperties
+from .tracking import ContextProperties, HeadersContext
 from .utils import MISSING
 
 if TYPE_CHECKING:
@@ -90,6 +91,7 @@ if TYPE_CHECKING:
     from .message import Attachment, Message
     from .threads import Thread
     from .poll import Poll
+    from .components import Component
 
     from .types import (
         activity,
@@ -100,6 +102,7 @@ if TYPE_CHECKING:
         channel,
         command,
         directory,
+        discovery,
         emoji,
         entitlements,
         experiment,
@@ -110,6 +113,7 @@ if TYPE_CHECKING:
         invite,
         library,
         member,
+        member_verification,
         message,
         oauth2,
         onboarding,
@@ -238,6 +242,33 @@ class MultipartParameters(NamedTuple):
                 file.close()
 
 
+_COMPONENTS_V2_TYPES = {
+    ComponentType.section,
+    ComponentType.text_display,
+    ComponentType.thumbnail,
+    ComponentType.media_gallery,
+    ComponentType.file,
+    ComponentType.separator,
+    ComponentType.container,
+}
+
+
+def _component_is_v2(component: Component) -> bool:
+    if component.type in _COMPONENTS_V2_TYPES:
+        return True
+
+    if isinstance(component, ActionRow):
+        return any(_component_is_v2(child) for child in component.children)
+    if isinstance(component, SectionComponent):
+        return any(_component_is_v2(child) for child in component.children) or _component_is_v2(component.accessory)
+    if isinstance(component, Container):
+        return any(_component_is_v2(child) for child in component.children)
+    if isinstance(component, LabelComponent):
+        return _component_is_v2(component.component)
+
+    return False
+
+
 def handle_message_parameters(
     content: Optional[str] = MISSING,
     *,
@@ -261,6 +292,7 @@ def handle_message_parameters(
     channel_payload: Dict[str, Any] = MISSING,
     applied_tags: Optional[SnowflakeList] = MISSING,
     poll: Optional[Poll] = MISSING,
+    components: Optional[Sequence[Component]] = MISSING,
 ) -> MultipartParameters:
     if files is not MISSING and file is not MISSING:
         raise TypeError('Cannot mix file and files keyword arguments.')
@@ -272,6 +304,9 @@ def handle_message_parameters(
 
     if attachments is not MISSING and files is not MISSING:
         raise TypeError('Cannot mix attachments and files keyword arguments.')
+
+    if files is not MISSING and len(files) > 10:
+        raise ValueError('files has a maximum of 10 elements')
 
     payload: Any = {'tts': tts}
     if embeds is not MISSING:
@@ -309,9 +344,6 @@ def handle_message_parameters(
         payload['avatar_url'] = str(avatar_url)
     if username:
         payload['username'] = username
-
-    if flags is not MISSING:
-        payload['flags'] = flags.value
 
     if thread_name is not MISSING:
         payload['thread_name'] = thread_name
@@ -355,14 +387,35 @@ def handle_message_parameters(
         else:
             payload['applied_tags'] = []
 
+    if components is not MISSING:
+        if components is None:
+            component_payload = []
+            has_v2_components = False
+        else:
+            has_v2_components = any(_component_is_v2(component) for component in components)
+            component_payload = [component.to_dict() for component in components]
+
+        payload['components'] = component_payload
+
+        if has_v2_components:
+            if payload.get('content') or payload.get('embeds') or payload.get('sticker_ids') or poll not in (MISSING, None):
+                raise ValueError('Components v2 messages cannot contain content, embeds, stickers, or polls')
+            if flags is not MISSING:
+                flags.components_v2 = True
+            else:
+                flags = MessageFlags(components_v2=True)
+
+    if flags is not MISSING:
+        payload['flags'] = flags.value
+
+    if poll not in (MISSING, None):
+        payload['poll'] = poll._to_dict()
+
     if channel_payload is not MISSING:
         payload = {
             'message': payload,
         }
         payload.update(channel_payload)
-
-    if poll not in (MISSING, None):
-        payload['poll'] = poll._to_dict()
 
     # Legacy uploading
     multipart = []
@@ -603,6 +656,7 @@ class HTTPClient:
         *,
         loop: asyncio.AbstractEventLoop,
         client: Optional[Client] = None,
+        headers_context: HeadersContext = MISSING,
         proxy: Optional[str] = None,
         proxy_auth: Optional[aiohttp.BasicAuth] = None,
         unsync_clock: bool = True,
@@ -616,6 +670,9 @@ class HTTPClient:
         proxy_gateway: bool = True,
         timezone: Optional[str] = None,
     ) -> None:
+        if client is None and headers_context is MISSING:
+            raise ValueError('headers_context must be provided if client is not provided')
+
         self.connector: aiohttp.BaseConnector = connector or MISSING
         self.loop: asyncio.AbstractEventLoop = loop
         self.client: Optional[Client] = client
@@ -651,7 +708,7 @@ class HTTPClient:
         if debug_options and 'trace' in debug_options:
             self.tracer = utils.IDGenerator()
 
-        self.headers: utils.Headers = MISSING
+        self.headers: HeadersContext = headers_context
         self._started: bool = False
 
     def __del__(self) -> None:
@@ -677,31 +734,30 @@ class HTTPClient:
 
         if self.connector is MISSING or self.connector.closed:
             self.connector = aiohttp.TCPConnector(limit=0)
-        self.__asession = session = await _gen_session(aiohttp.ClientSession(connector=self.connector))
-        self.headers = headers = await utils.Headers.default(session, self.proxy, self.proxy_auth)
+        self.__asession = await _gen_session(aiohttp.ClientSession(connector=self.connector))
+
+        if self.client is not None:
+            self.headers = await self.client.headers_context()
+        headers = self.headers
+
         _log.info(
             'Found user agent "%s", build number %s.',
             headers.user_agent,
             headers.super_properties.get('client_build_number'),
         )
+        _log.info('Found TLS fingerprint target "%s".', headers.impersonate)
 
-        try:
-            impersonate = requests.impersonate.DEFAULT_CHROME
-        except AttributeError:
-            # Breaking change
-            impersonate = 'chrome'
-
-        _log.info('Found TLS fingerprint target "%s".', impersonate)
-        self.__session = requests.AsyncSession(impersonate=impersonate, default_headers=False)
+        self.__session = requests.AsyncSession(impersonate=headers.impersonate, default_headers=False)  # pyright: ignore[reportArgumentType]
         self._started = True
 
     async def ws_connect(self, url: str, **kwargs) -> requests.AsyncWebSocket:
         await self.startup()
 
         headers: Dict[str, Any] = {
+            'Accept': '*/*',
             'Accept-Language': 'en-US,en;q=0.9',
             'Accept-Encoding': 'gzip, deflate, br, zstd',
-            'Origin': 'https://discord.com',
+            'Origin': f'https://{self.headers.BASE_DOMAIN}',
             'Sec-WebSocket-Extensions': 'permessage-deflate; client_max_window_bits',
             'User-Agent': self.user_agent,
         }
@@ -725,7 +781,7 @@ class HTTPClient:
 
     @property
     def browser_version(self) -> int:
-        return self.headers.major_version
+        return self.headers.browser_major_version
 
     @property
     def user_agent(self) -> str:
@@ -794,9 +850,8 @@ class HTTPClient:
             'Accept': '*/*',
             'Accept-Language': 'en-US,en;q=0.9',
             'Accept-Encoding': 'gzip, deflate, br, zstd',
-            'Origin': 'https://discord.com',
-            'Priority': 'u=0, i',
-            'Referer': 'https://discord.com/channels/@me',
+            'Origin': f'https://{self.headers.BASE_DOMAIN}',
+            'Referer': f'https://{self.headers.BASE_DOMAIN}/channels/@me',
             'Sec-Fetch-Dest': 'empty',
             'Sec-Fetch-Mode': 'cors',
             'Sec-Fetch-Site': 'same-origin',
@@ -2117,6 +2172,13 @@ class HTTPClient:
     def get_guild_preview(self, guild_id: Snowflake) -> Response[guild.GuildPreview]:
         return self.request(Route('GET', '/guilds/{guild_id}/preview', guild_id=guild_id))
 
+    def get_stream_preview(self, stream_key: str) -> Response[Dict[str, str]]:
+        return self.request(Route('GET', '/streams/{stream_key}/preview', stream_key=stream_key))
+
+    def upload_stream_preview(self, stream_key: str, thumbnail: str) -> Response[None]:
+        payload = {'thumbnail': thumbnail}
+        return self.request(Route('POST', '/streams/{stream_key}/preview', stream_key=stream_key), json=payload)
+
     def delete_guild(self, guild_id: Snowflake) -> Response[None]:
         return self.request(Route('POST', '/guilds/{guild_id}/delete', guild_id=guild_id))
 
@@ -2198,7 +2260,7 @@ class HTTPClient:
         payload = {'code': code}
         return self.request(Route('PATCH', '/guilds/{guild_id}/vanity-url', guild_id=guild_id), json=payload, reason=reason)
 
-    def get_all_guild_channels(self, guild_id: Snowflake) -> Response[List[guild.GuildChannel]]:
+    def get_all_guild_channels(self, guild_id: Snowflake) -> Response[List[channel.GuildChannel]]:
         return self.request(Route('GET', '/guilds/{guild_id}/channels', guild_id=guild_id))
 
     def get_top_guild_channels(self, guild_id: Snowflake) -> Response[List[Snowflake]]:
@@ -2376,20 +2438,115 @@ class HTTPClient:
         )
 
     def get_member_verification(
-        self, guild_id: Snowflake, *, with_guild: bool = False, invite: str = MISSING
-    ):  # TODO: return type
+        self, guild_id: Snowflake, *, with_guild: bool = False, invite: Optional[str] = None
+    ) -> Response[member_verification.MemberVerification]:
         params = {
             'with_guild': str(with_guild).lower(),
         }
-        if invite is not MISSING:
+        if invite is not None:
             params['invite_code'] = invite
 
         return self.request(Route('GET', '/guilds/{guild_id}/member-verification', guild_id=guild_id), params=params)
 
-    def accept_member_verification(
-        self, guild_id: Snowflake, **fields
-    ) -> Response[None]:  # payload is the same as the above return type
-        return self.request(Route('PUT', '/guilds/{guild_id}/requests/@me', guild_id=guild_id), json=fields)
+    def edit_member_verification(
+        self, guild_id: Snowflake, payload: Dict[str, Any], *, reason: Optional[str] = None
+    ) -> Response[member_verification.MemberVerification]:
+        return self.request(
+            Route('PATCH', '/guilds/{guild_id}/member-verification', guild_id=guild_id), json=payload, reason=reason
+        )
+
+    def get_join_requests(
+        self,
+        guild_id: Snowflake,
+        status: str,
+        *,
+        limit: int = 100,
+        before: Optional[Snowflake] = None,
+        after: Optional[Snowflake] = None,
+    ) -> Response[member_verification.JoinRequestList]:
+        params: Dict[str, Any] = {
+            'status': status,
+            'limit': limit,
+        }
+        if before is not None:
+            params['before'] = before
+        if after is not None:
+            params['after'] = after
+
+        return self.request(Route('GET', '/guilds/{guild_id}/requests', guild_id=guild_id), params=params)
+
+    def get_join_request(self, request_id: Snowflake) -> Response[member_verification.JoinRequest]:
+        return self.request(Route('GET', '/join-requests/{request_id}', request_id=request_id))
+
+    def get_own_join_request(self, guild_id: Snowflake) -> Response[member_verification.JoinRequest]:
+        return self.request(Route('GET', '/guilds/{guild_id}/requests/@me', guild_id=guild_id))
+
+    def get_join_request_cooldown(self, guild_id: Snowflake) -> Response[member_verification.JoinRequestCooldown]:
+        return self.request(Route('GET', '/guilds/{guild_id}/requests/@me/cooldown', guild_id=guild_id))
+
+    def create_join_request(
+        self,
+        guild_id: Snowflake,
+        form_fields: List[member_verification.MemberVerificationFormField],
+        version: Optional[str],
+    ) -> Response[member_verification.JoinRequest]:
+        payload = {
+            'form_fields': form_fields,
+            'version': version,
+        }
+        return self.request(Route('PUT', '/guilds/{guild_id}/requests/@me', guild_id=guild_id), json=payload)
+
+    def reset_join_request(self, guild_id: Snowflake) -> Response[member_verification.JoinRequest]:
+        return self.request(Route('POST', '/guilds/{guild_id}/requests/@me', guild_id=guild_id))
+
+    def ack_join_request(self, guild_id: Snowflake, request_id: Snowflake) -> Response[None]:
+        return self.request(
+            Route(
+                'POST',
+                '/guilds/{guild_id}/requests/{request_id}/ack',
+                guild_id=guild_id,
+                request_id=request_id,
+            )
+        )
+
+    def delete_join_request(self, guild_id: Snowflake) -> Response[Optional[member_verification.JoinRequest]]:
+        return self.request(Route('DELETE', '/guilds/{guild_id}/requests/@me', guild_id=guild_id))
+
+    def create_join_request_interview(self, request_id: Snowflake) -> Response[channel.GroupDMChannel]:
+        return self.request(Route('POST', '/join-requests/{request_id}/interview', request_id=request_id))
+
+    def action_join_request(
+        self,
+        guild_id: Snowflake,
+        request_id: Snowflake,
+        action: str,
+        *,
+        rejection_reason: Optional[str] = None,
+    ) -> Response[member_verification.JoinRequest]:
+        payload: Dict[str, Any] = {'action': action}
+        if rejection_reason is not None:
+            payload['rejection_reason'] = rejection_reason
+
+        return self.request(
+            Route(
+                'PATCH',
+                '/guilds/{guild_id}/requests/{request_id}',
+                guild_id=guild_id,
+                request_id=request_id,
+            ),
+            json=payload,
+        )
+
+    def bulk_action_join_requests(self, guild_id: Snowflake, action: str) -> Response[None]:
+        return self.request(Route('PATCH', '/guilds/{guild_id}/requests', guild_id=guild_id), json={'action': action})
+
+    def get_user_join_requests(
+        self, guild_id: Snowflake, user_id: Snowflake
+    ) -> Response[List[member_verification.JoinRequest]]:
+        return self.request(Route('GET', '/guilds/{guild_id}/requests/users/{user_id}', guild_id=guild_id, user_id=user_id))
+
+    def get_join_request_guilds(self) -> Response[List[guild.PartialGuild]]:
+        return self.request(Route('GET', '/users/@me/join-request-guilds'))
 
     def get_all_integrations(
         self,
@@ -2592,6 +2749,7 @@ class HTTPClient:
         *,
         with_counts: bool = True,
         with_permissions: bool = True,
+        with_profile: bool = True,
         guild_scheduled_event_id: Optional[Snowflake] = None,
         input_value: Optional[str] = None,
     ) -> Response[Union[invite.PartialInvite, invite.InviteWithCounts]]:
@@ -2599,6 +2757,7 @@ class HTTPClient:
             'with_counts': str(with_counts).lower(),
             'with_expiration': 'true',  # No longer exists
             'with_permissions': str(with_permissions).lower(),
+            'with_profile': str(with_profile).lower(),
         }
         if input_value:
             params['inputValue'] = input_value
@@ -3041,10 +3200,13 @@ class HTTPClient:
         type: Optional[int] = None,
         *,
         action: RelationshipAction,
+        confirm_stranger_request: bool = False,
     ) -> Response[None]:
         payload = {}
         if type is not None:
             payload['type'] = type
+        if confirm_stranger_request:
+            payload['confirm_stranger_request'] = True
 
         if action is RelationshipAction.accept_request:  # User Profile, Friends, DM Channel
             props = choice(
@@ -4858,36 +5020,57 @@ class HTTPClient:
     def get_application_commands(self, application_id: Snowflake) -> Response[List[command.ApplicationCommand]]:
         return self.request(Route('GET', '/applications/{application_id}/commands', application_id=application_id))
 
-    def search_application_commands(
-        self,
-        channel_id: Snowflake,
-        type: int,
-        *,
-        limit: Optional[int] = None,
-        query: Optional[str] = None,
-        cursor: Optional[str] = None,
-        command_ids: Optional[List[Snowflake]] = None,
-        application_id: Optional[Snowflake] = None,
-        include_applications: Optional[bool] = None,
-    ) -> Response[command.ApplicationCommandSearch]:
-        params: Dict[str, Any] = {
-            'type': type,
-        }
-        if include_applications is not None:
-            params['include_applications'] = str(include_applications).lower()
-        if limit is not None:
-            params['limit'] = limit
-        if query:
-            params['query'] = query
-        if cursor:
-            params['cursor'] = cursor
-        if command_ids:
-            params['command_ids'] = ','.join(map(str, command_ids))
-        if application_id:
-            params['application_id'] = application_id
-
+    def application_command_index(self, application_id: Snowflake) -> Response[command.ApplicationCommandIndex]:
         return self.request(
-            Route('GET', '/channels/{channel_id}/application-commands/search', channel_id=channel_id), params=params
+            Route('GET', '/applications/{application_id}/application-command-index', application_id=application_id)
+        )
+
+    def get_guild_application_command_permissions(
+        self,
+        application_id: Snowflake,
+        guild_id: Snowflake,
+    ) -> Response[List[command.GuildApplicationCommandPermissions]]:
+        return self.request(
+            Route(
+                'GET',
+                '/applications/{application_id}/guilds/{guild_id}/commands/permissions',
+                application_id=application_id,
+                guild_id=guild_id,
+            )
+        )
+
+    def get_application_command_permissions(
+        self,
+        application_id: Snowflake,
+        guild_id: Snowflake,
+        command_id: Snowflake,
+    ) -> Response[command.GuildApplicationCommandPermissions]:
+        return self.request(
+            Route(
+                'GET',
+                '/applications/{application_id}/guilds/{guild_id}/commands/{command_id}/permissions',
+                application_id=application_id,
+                guild_id=guild_id,
+                command_id=command_id,
+            )
+        )
+
+    def edit_application_command_permissions(
+        self,
+        application_id: Snowflake,
+        guild_id: Snowflake,
+        command_id: Snowflake,
+        payload: List[command.ApplicationCommandPermissions],
+    ) -> Response[command.GuildApplicationCommandPermissions]:
+        return self.request(
+            Route(
+                'PUT',
+                '/applications/{application_id}/guilds/{guild_id}/commands/{command_id}/permissions',
+                application_id=application_id,
+                guild_id=guild_id,
+                command_id=command_id,
+            ),
+            json={'permissions': payload},
         )
 
     def guild_application_command_index(self, guild_id: Snowflake) -> Response[command.GuildApplicationCommandIndex]:
@@ -4930,23 +5113,25 @@ class HTTPClient:
             payload['guild_id'] = str(guild.id)
 
         form = []
-        to_upload = [file for file in files if isinstance(file, File)] if files else []
-        if files is not None:
-            form.append({'name': 'payload_json', 'data': utils._to_json(payload)})
-
+        to_upload: List[File] = []
+        if files:
             # Legacy uploading
-            for index, file in enumerate(to_upload or []):
-                form.append(
-                    {
-                        'name': f'files[{index}]',
-                        'data': file.fp,
-                        'filename': file.filename,
-                        'content_type': 'application/octet-stream',
-                    }
-                )
-            payload = None
+            for index, file in enumerate(files):
+                if isinstance(file, File):
+                    to_upload.append(file)
+                    form.append(
+                        {
+                            'name': f'files[{index}]',
+                            'data': file.fp,
+                            'filename': file.filename,
+                            'content_type': 'application/octet-stream',
+                        }
+                    )
+            if to_upload:
+                form.insert(0, {'name': 'payload_json', 'data': utils._to_json(payload)})
+                payload = None
 
-        return self.request(Route('POST', '/interactions'), json=payload, form=form, files=to_upload)
+        return self.request(Route('POST', '/interactions'), json=payload, form=form, files=to_upload or None)
 
     def get_user_affinities(self) -> Response[user.UserAffinities]:
         return self.request(Route('GET', '/users/@me/affinities/users'))
@@ -5135,3 +5320,11 @@ class HTTPClient:
     def join_hub_token(self, token: str) -> Response[hub.EmailDomainVerification]:
         payload = {'token': token}
         return self.request(Route('POST', '/guilds/automations/email-domain-lookup/verify'), json=payload)
+
+    # Discovery
+
+    def get_guild_profile(self, guild_id: Snowflake) -> Response[discovery.GuildProfile]:
+        return self.request(Route('GET', '/guilds/{guild_id}/profile', guild_id=guild_id))
+
+    def edit_guild_profile(self, guild_id: Snowflake, payload: Dict[str, Any]) -> Response[discovery.GuildProfile]:
+        return self.request(Route('PATCH', '/guilds/{guild_id}/profile', guild_id=guild_id), json=payload)

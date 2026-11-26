@@ -45,8 +45,48 @@ Client
     .. automethod:: Client.event()
         :decorator:
 
+HeadersContext
+~~~~~~~~~~~~~~~~
+
+.. attributetable:: HeadersContext
+
+.. autoclass:: HeadersContext
+    :members:
+
 Voice Related
 ---------------
+
+VoiceCodec
+~~~~~~~~~~~~
+
+.. attributetable:: VoiceCodec
+
+.. autoclass:: VoiceCodec
+    :members:
+
+VoiceStreamResolution
+~~~~~~~~~~~~~~~~~~~~~~
+
+.. attributetable:: VoiceStreamResolution
+
+.. autoclass:: VoiceStreamResolution
+    :members:
+
+VoiceStream
+~~~~~~~~~~~~
+
+.. attributetable:: VoiceStream
+
+.. autoclass:: VoiceStream
+    :members:
+
+SpeakingFlags
+~~~~~~~~~~~~~~
+
+.. attributetable:: SpeakingFlags
+
+.. autoclass:: SpeakingFlags
+    :members:
 
 VoiceClient
 ~~~~~~~~~~~~
@@ -63,6 +103,24 @@ VoiceProtocol
 .. attributetable:: VoiceProtocol
 
 .. autoclass:: VoiceProtocol
+    :members:
+
+.. attributetable:: StreamProtocol
+
+.. autoclass:: StreamProtocol
+    :members:
+
+Stream
+~~~~~~~
+
+.. attributetable:: Stream
+
+.. autoclass:: Stream()
+    :members:
+
+.. attributetable:: StreamKey
+
+.. autoclass:: StreamKey()
     :members:
 
 AudioSource
@@ -149,49 +207,6 @@ to handle it, which defaults to logging the traceback and ignoring the exception
 
     All the events must be a |coroutine_link|_. If they aren't, then you might get unexpected
     errors. In order to turn a function into a coroutine they must be defined with ``async def``.
-
-AutoMod
-~~~~~~~
-
-.. function:: on_automod_rule_create(rule)
-
-    Called when a :class:`AutoModRule` is created.
-    You must have :attr:`~Permissions.manage_guild` to receive this.
-
-    .. versionadded:: 2.0
-
-    :param rule: The rule that was created.
-    :type rule: :class:`AutoModRule`
-
-.. function:: on_automod_rule_update(rule)
-
-    Called when a :class:`AutoModRule` is updated.
-    You must have :attr:`~Permissions.manage_guild` to receive this.
-
-    .. versionadded:: 2.0
-
-    :param rule: The rule that was updated.
-    :type rule: :class:`AutoModRule`
-
-.. function:: on_automod_rule_delete(rule)
-
-    Called when a :class:`AutoModRule` is deleted.
-    You must have :attr:`~Permissions.manage_guild` to receive this.
-
-    .. versionadded:: 2.0
-
-    :param rule: The rule that was deleted.
-    :type rule: :class:`AutoModRule`
-
-.. function:: on_automod_action(execution)
-
-    Called when a :class:`AutoModAction` is created/performed.
-    You must have :attr:`~Permissions.manage_guild` to receive this.
-
-    .. versionadded:: 2.0
-
-    :param execution: The rule execution that was performed.
-    :type execution: :class:`AutoModAction`
 
 Channels
 ~~~~~~~~~
@@ -378,9 +393,8 @@ Debug
         WebSocket. The voice WebSocket will not trigger this event.
 
     :param payload: The message that is about to be passed on to the
-                    WebSocket library. It can be :class:`bytes` to denote a binary
-                    message or :class:`str` to denote a regular text message.
-    :type payload: Union[:class:`bytes`, :class:`str`]
+                    WebSocket library.
+    :type payload: :class:`str`
 
 Directory Entries
 ~~~~~~~~~~~~~~~~~~
@@ -395,6 +409,64 @@ Directory Entries
 
     :param directory_entry: The directory entry that was created, updated, or deleted.
     :type directory_entry: :class:`DirectoryEntry`
+
+Member Verification
+~~~~~~~~~~~~~~~~~~~~
+
+.. function:: on_join_request_create(join_request)
+              on_join_request_update(join_request)
+
+    Called when a :class:`JoinRequest` is created or updated in a guild with
+    member verification enabled.
+
+    This requires :attr:`~Permissions.kick_members` for join requests other than
+    your own. Join requests with a status of :attr:`JoinRequestStatus.started` are
+    only dispatched for your own join requests.
+
+    .. note::
+
+        If a join request is created or updated for a user with
+        :attr:`~Permissions.kick_members`, this event is dispatched twice: once for
+        being the user who created it, and once for receiving it as a moderator.
+
+    .. versionadded:: 2.2
+
+    :param join_request: The join request that was created or updated.
+    :type join_request: :class:`JoinRequest`
+
+.. function:: on_join_request_delete(guild, user)
+
+    Called when a :class:`JoinRequest` is deleted in a guild with member
+    verification enabled.
+
+    This requires :attr:`~Permissions.kick_members` for join requests other than
+    your own.
+
+    This is only called if the user who created the join request is found in the
+    internal cache. To be notified regardless, use :func:`on_raw_join_request_delete`.
+
+    .. versionadded:: 2.2
+
+    :param guild: The guild the join request was for.
+    :type guild: :class:`Guild`
+    :param user: The user that created the join request.
+    :type user: :class:`User`
+
+.. function:: on_raw_join_request_delete(payload)
+
+    Called when a :class:`JoinRequest` is deleted in a guild with member
+    verification enabled.
+
+    This requires :attr:`~Permissions.kick_members` for join requests other than
+    your own.
+
+    Unlike :func:`on_join_request_delete`, this is called regardless of the state
+    of the internal user cache.
+
+    .. versionadded:: 2.2
+
+    :param payload: The raw event payload data.
+    :type payload: :class:`RawJoinRequestDeleteEvent`
 
 Gateway
 ~~~~~~~~
@@ -446,8 +518,8 @@ Client
 
     .. versionadded:: 2.0
 
-    :param before: The guild settings prior to being updated.
-    :type before: :class:`GuildSettings`
+    :param before: The guild settings prior to being updated, if any.
+    :type before: Optional[:class:`GuildSettings`]
     :param after: The guild settings after being updated.
     :type after: :class:`GuildSettings`
 
@@ -540,8 +612,8 @@ Billing
     :type path: :class:`str`
     :param query: The URL query parameters of the callback.
     :type query: Mapping[:class:`str`, :class:`str`]
-    :param state: A hash to verify the callback.
-    :type state: :class:`str`
+    :param state: A hash to verify the callback, if provided.
+    :type state: Optional[:class:`str`]
 
 Entitlements
 ~~~~~~~~~~~~
@@ -771,9 +843,63 @@ Calls
     e.g. when a member is added or another person is rung.
 
     :param before: The previous call.
-    :type before: :class:`Relationship`
+    :type before: Union[:class:`PrivateCall`, :class:`GroupCall`]
     :param after: The updated call.
-    :type after: :class:`Relationship`
+    :type after: Union[:class:`PrivateCall`, :class:`GroupCall`]
+
+Streams
+~~~~~~~~
+
+.. function:: on_stream_create(stream)
+
+    Called when a :class:`Stream` is created.
+
+    This is not called when an unavailable stream becomes available again. Use
+    :func:`on_stream_available` for that case.
+
+    :param stream: The stream that was created.
+    :type stream: :class:`Stream`
+
+.. function:: on_stream_available(stream)
+
+    Called when a previously unavailable :class:`Stream` becomes available again.
+
+    The stream remains cached while unavailable and is updated in-place before
+    this event is dispatched.
+
+    :param stream: The stream that became available.
+    :type stream: :class:`Stream`
+
+.. function:: on_stream_unavailable(stream)
+
+    Called when a :class:`Stream` becomes temporarily unavailable.
+
+    Unavailable streams remain in the cache and may later dispatch
+    :func:`on_stream_available`.
+
+    :param stream: The stream that became unavailable.
+    :type stream: :class:`Stream`
+
+.. function:: on_stream_update(before, after)
+
+    Called when a :class:`Stream` is updated.
+
+    :param before: The previous stream.
+    :type before: :class:`Stream`
+    :param after: The updated stream.
+    :type after: :class:`Stream`
+
+.. function:: on_stream_delete(stream, reason)
+
+    Called when a :class:`Stream` is deleted or a creation failed.
+
+    This is not called for temporary stream outages. Use
+    :func:`on_stream_unavailable` for that case.
+
+    :param stream: The stream that was deleted.
+    :type stream: :class:`Stream`
+    :param reason: The stream deletion reason.
+    :type reason: :class:`StreamDeleteReason`
 
 Guilds
 ~~~~~~~
@@ -878,39 +1004,6 @@ Guilds
     :param entry: The audit log entry that was created.
     :type entry: :class:`AuditLogEntry`
 
-.. function:: on_invite_create(invite)
-
-    Called when an :class:`Invite` is created.
-    You must have :attr:`~Permissions.manage_channels` to receive this.
-
-    .. versionadded:: 1.3
-
-    .. note::
-
-        There is a rare possibility that the :attr:`Invite.guild` and :attr:`Invite.channel`
-        attributes will be of :class:`Object` rather than the respective models.
-
-    :param invite: The invite that was created.
-    :type invite: :class:`Invite`
-
-.. function:: on_invite_delete(invite)
-
-    Called when an :class:`Invite` is deleted.
-    You must have :attr:`~Permissions.manage_channels` to receive this.
-
-    .. versionadded:: 1.3
-
-    .. note::
-
-        There is a rare possibility that the :attr:`Invite.guild` and :attr:`Invite.channel`
-        attributes will be of :class:`Object` rather than the respective models.
-
-        Outside of those two attributes, the only other attribute guaranteed to be
-        filled by the Discord gateway for this event is :attr:`Invite.code`.
-
-    :param invite: The invite that was deleted.
-    :type invite: :class:`Invite`
-
 .. function:: on_guild_feature_ack(payload)
 
     Called when a :class:`Guild` feature is acknowledged.
@@ -991,6 +1084,15 @@ Interactions
 
     :param interaction: The interaction data with :attr:`Interaction.successful` filled.
     :type interaction: :class:`Interaction`
+
+.. function:: on_application_command_autocomplete_response(response)
+
+    Called when an application command autocomplete request receives a response.
+
+    .. versionadded:: 2.2
+
+    :param response: The autocomplete response data.
+    :type response: :class:`ApplicationCommandAutocomplete`
 
 .. function:: on_modal(modal)
 
@@ -1667,8 +1769,9 @@ Voice
     - A member is muted or deafened by their own accord.
     - A member is muted or deafened by a guild administrator.
 
-    :param member: The member whose voice states changed.
-    :type member: :class:`Member`
+    :param member: The member whose voice states changed. This is a :class:`User`
+                   for voice states outside of a guild, such as in a private call.
+    :type member: Union[:class:`Member`, :class:`User`]
     :param before: The voice state prior to the changes.
     :type before: :class:`VoiceState`
     :param after: The voice state after the changes.
@@ -3244,7 +3347,7 @@ of :class:`enum.Enum`.
 
     .. attribute:: scheduled_event_update
 
-        A scheduled event was created.
+        A scheduled event was updated.
 
         When this is the action, the type of :attr:`~AuditLogEntry.target` is
         the :class:`ScheduledEvent` or :class:`Object` with the ID of the event
@@ -3264,7 +3367,7 @@ of :class:`enum.Enum`.
 
     .. attribute:: scheduled_event_delete
 
-        A scheduled event was created.
+        A scheduled event was deleted.
 
         When this is the action, the type of :attr:`~AuditLogEntry.target` is
         the :class:`ScheduledEvent` or :class:`Object` with the ID of the event
@@ -3335,6 +3438,21 @@ of :class:`enum.Enum`.
         - :attr:`~AuditLogDiff.invitable`
 
         .. versionadded:: 2.0
+
+    .. attribute:: application_command_permission_update
+
+        An application command's permissions were updated.
+
+        When this is the action, the type of :attr:`~AuditLogEntry.target` is
+        an :class:`Integration`, one of :class:`SlashCommand`, :class:`UserCommand`,
+        :class:`MessageCommand`, :class:`PrimaryEntryPointCommand`, or
+        :class:`Object`.
+
+        Possible attributes for :class:`AuditLogDiff`:
+
+        - :attr:`~AuditLogDiff.application_command_permissions`
+
+        .. versionadded:: 2.2
 
     .. attribute:: automod_rule_create
 
@@ -4236,6 +4354,58 @@ of :class:`enum.Enum`.
     .. attribute:: full
 
         Represents full camera video quality.
+
+.. class:: StreamType
+
+    Represents the type of a stream key.
+
+    .. versionadded:: 2.2
+
+    .. attribute:: guild
+
+        Represents a guild voice channel stream.
+
+    .. attribute:: call
+
+        Represents a private call stream.
+
+    .. attribute:: test
+
+        Represents an RTC speed test stream.
+
+.. class:: StreamDeleteReason
+
+    Represents the reason a stream was deleted or failed to be created.
+
+    .. versionadded:: 2.2
+
+    .. attribute:: user_requested
+
+        The user requested to end the stream.
+
+    .. attribute:: stream_ended
+
+        The client was disconnected because the stream ended.
+
+    .. attribute:: stream_full
+
+        The client attempted to join a full stream.
+
+    .. attribute:: unauthorized
+
+        The client is not authorized to view the stream.
+
+    .. attribute:: safety_guild_rate_limited
+
+        The stream was rate limited due to guild restrictions.
+
+    .. attribute:: parse_failed
+
+        Parsing the stream key failed.
+
+    .. attribute:: invalid_channel
+
+        The provided channel is not valid for this stream type.
 
 .. class:: PrivacyLevel
 
@@ -5914,6 +6084,11 @@ of :class:`enum.Enum`.
 
         .. versionadded:: 2.1
 
+    .. attribute:: fallback
+
+        Optional[:class:`Locale`]: Returns the locale's fallback locale if one exists.
+
+        .. versionadded:: 2.2
 
 .. class:: MFALevel
 
@@ -6239,6 +6414,110 @@ of :class:`enum.Enum`.
 
         Represents submission of a modal interaction.
 
+.. class:: InteractionFailureReason
+
+    Specifies why an :class:`Interaction` failed.
+
+    .. versionadded:: 2.2
+
+    .. attribute:: unknown
+
+        The failure reason is unknown.
+
+    .. attribute:: timeout
+
+        The interaction timed out.
+
+    .. attribute:: activity_launch_unknown_application
+
+        The activity application is unknown.
+
+    .. attribute:: activity_launch_unknown_channel
+
+        The activity channel is unknown.
+
+    .. attribute:: activity_launch_unknown_guild
+
+        The activity guild is unknown.
+
+    .. attribute:: activity_launch_invalid_platform
+
+        The activity cannot be launched on the current platform.
+
+    .. attribute:: activity_launch_not_in_experiment
+
+        The guild or user is not eligible for a required experiment.
+
+    .. attribute:: activity_launch_invalid_channel_type
+
+        The activity cannot be launched in the current channel type.
+
+    .. attribute:: activity_launch_invalid_channel_no_afk
+
+        The activity cannot be launched in an AFK channel.
+
+    .. attribute:: activity_launch_invalid_dev_preview_guild_size
+
+        The guild is too large for the activity's development preview.
+
+    .. attribute:: activity_launch_invalid_user_age_gate
+
+        The user cannot use an NSFW interaction.
+
+    .. attribute:: activity_launch_invalid_user_verification_level
+
+        The user does not meet the guild's verification level.
+
+    .. attribute:: activity_launch_invalid_user_permissions
+
+        The user has insufficient permissions for the interaction.
+
+    .. attribute:: activity_launch_invalid_configuration_not_embedded
+
+        The application is not an embedded activity.
+
+    .. attribute:: activity_launch_invalid_configuration_platform_not_supported
+
+        The embedded activity does not support the current platform.
+
+    .. attribute:: activity_launch_invalid_configuration_platform_not_released
+
+        The embedded activity is not released for the current platform.
+
+    .. attribute:: activity_launch_failed_to_launch
+
+        The activity failed to launch.
+
+    .. attribute:: activity_launch_invalid_user_no_access_to_activity
+
+        The user does not have access to launch the activity.
+
+    .. attribute:: activity_launch_invalid_location_type
+
+        The activity cannot be launched from the current location type.
+
+    .. attribute:: activity_launch_invalid_user_region_for_application
+
+        The embedded activity is not supported in the current region.
+
+.. class:: IFrameModalSize
+
+    Specifies the size of an :class:`IFrameModal`.
+
+    .. versionadded:: 2.2
+
+    .. attribute:: small
+
+        A small modal.
+
+    .. attribute:: normal
+
+        A normal modal.
+
+    .. attribute:: big
+
+        A big modal.
+
 .. class:: ComponentType
 
     Represents the component type of a component.
@@ -6257,9 +6536,77 @@ of :class:`enum.Enum`.
 
         Represents a select component.
 
+    .. attribute:: string_select
+
+        Represents a string select component. This is an alias for :attr:`select`.
+
     .. attribute:: text_input
 
         Represents a text box component.
+
+    .. attribute:: user_select
+
+        Represents a user select component.
+
+    .. attribute:: role_select
+
+        Represents a role select component.
+
+    .. attribute:: mentionable_select
+
+        Represents a mentionable select component.
+
+    .. attribute:: channel_select
+
+        Represents a channel select component.
+
+    .. attribute:: section
+
+        Represents a section component.
+
+    .. attribute:: text_display
+
+        Represents a text display component.
+
+    .. attribute:: thumbnail
+
+        Represents a thumbnail component.
+
+    .. attribute:: media_gallery
+
+        Represents a media gallery component.
+
+    .. attribute:: file
+
+        Represents a file component.
+
+    .. attribute:: separator
+
+        Represents a separator component.
+
+    .. attribute:: container
+
+        Represents a container component.
+
+    .. attribute:: label
+
+        Represents a label component.
+
+    .. attribute:: file_upload
+
+        Represents a file upload component.
+
+    .. attribute:: radio_group
+
+        Represents a radio group component.
+
+    .. attribute:: checkbox_group
+
+        Represents a checkbox group component.
+
+    .. attribute:: checkbox
+
+        Represents a checkbox component.
 
 .. class:: ButtonStyle
 
@@ -6286,6 +6633,10 @@ of :class:`enum.Enum`.
     .. attribute:: link
 
         Represents a link button.
+
+    .. attribute:: premium
+
+        Represents a premium button.
 
     .. attribute:: blurple
 
@@ -6329,6 +6680,60 @@ of :class:`enum.Enum`.
 
         An alias for :attr:`paragraph`.
 
+.. class:: SelectDefaultValueType
+
+    Represents the type of default value for a select component.
+
+    .. versionadded:: 2.2
+
+    .. attribute:: user
+
+        Represents a user default value.
+
+    .. attribute:: role
+
+        Represents a role default value.
+
+    .. attribute:: channel
+
+        Represents a channel default value.
+
+.. class:: SeparatorSpacing
+
+    Represents the spacing size of a separator component.
+
+    .. versionadded:: 2.2
+
+    .. attribute:: small
+
+        Represents small separator spacing.
+
+    .. attribute:: large
+
+        Represents large separator spacing.
+
+.. class:: MediaItemLoadingState
+
+    Represents the loading state of media in a component.
+
+    .. versionadded:: 2.2
+
+    .. attribute:: unknown
+
+        The loading state is unknown.
+
+    .. attribute:: loading
+
+        The media is loading.
+
+    .. attribute:: loaded
+
+        The media has loaded.
+
+    .. attribute:: not_found
+
+        The media could not be found.
+
 .. class:: ApplicationCommandType
 
     The type of application command.
@@ -6346,6 +6751,76 @@ of :class:`enum.Enum`.
     .. attribute:: message
 
         A message context menu command.
+
+    .. attribute:: primary_entry_point
+
+        A primary entry point command.
+
+        .. versionadded:: 2.2
+
+.. class:: ApplicationCommandPermissionType
+
+    The type of application command permission overwrite.
+
+    .. versionadded:: 2.2
+
+    .. attribute:: role
+
+        The overwrite applies to a role.
+
+    .. attribute:: user
+
+        The overwrite applies to a user or guild member.
+
+    .. attribute:: channel
+
+        The overwrite applies to a channel.
+
+.. class:: ApplicationCommandHandlerType
+
+    The handler type of an application command.
+
+    .. versionadded:: 2.2
+
+    .. attribute:: app_handler
+
+        The command is handled by the application.
+
+    .. attribute:: discord_launch_activity
+
+        The command launches an activity through Discord.
+
+.. class:: InteractionContextType
+
+    The interaction context where an application command can be used.
+
+    .. versionadded:: 2.2
+
+    .. attribute:: guild
+
+        The command can be used in guilds.
+
+    .. attribute:: bot_dm
+
+        The command can be used in bot DMs.
+
+    .. attribute:: private_channel
+
+        The command can be used in private channels.
+
+.. class:: InteractionInstallationType
+
+    The installation context where an application command can be installed.
+
+    .. versionadded:: 2.2
+
+    .. attribute:: guild
+
+        The command can be installed to guilds.
+
+    .. attribute:: user
+
+        The command can be installed to users.
 
 .. class:: ApplicationCommandOptionType
 
@@ -6724,6 +7199,50 @@ of :class:`enum.Enum`.
 
         Default channels and questions count towards onboarding constraints.
 
+.. class:: MemberVerificationFieldType
+
+    Represents the type of a member verification question.
+
+    .. versionadded:: 2.2
+
+    .. attribute:: terms
+
+        The user must agree to the guild's rules.
+
+    .. attribute:: text_input
+
+        The user must respond with a short answer.
+
+    .. attribute:: paragraph
+
+        The user must respond with a paragraph.
+
+    .. attribute:: multiple_choice
+
+        The user must select one of the provided choices.
+
+.. class:: JoinRequestStatus
+
+    Represents the status of a :class:`JoinRequest`.
+
+    .. versionadded:: 2.2
+
+    .. attribute:: started
+
+        The join request has been started but not submitted.
+
+    .. attribute:: submitted
+
+        The join request has been submitted.
+
+    .. attribute:: rejected
+
+        The join request has been rejected.
+
+    .. attribute:: approved
+
+        The join request has been approved.
+
 .. class:: CollectibleType
 
     Represents the type of a :class:`Collectible`.
@@ -6841,6 +7360,155 @@ of :class:`enum.Enum`.
     .. attribute:: ads_budget_ab
 
         The experiment is running on the ads portal.
+
+.. class:: GuildBadgeType
+
+    Represents a guild badge.
+
+    .. versionadded:: 2.2
+
+    .. attribute:: sword
+
+        The guild has the sword badge.
+
+    .. attribute:: water_drop
+
+        The guild has the water drop badge.
+
+    .. attribute:: skull
+
+        The guild has the skull badge.
+
+    .. attribute:: toadstool
+
+        The guild has the toadstool badge.
+
+    .. attribute:: moon
+
+        The guild has the moon badge.
+
+    .. attribute:: lightning
+
+        The guild has the lightning badge.
+
+    .. attribute:: leaf
+
+        The guild has the leaf badge.
+
+    .. attribute:: heart
+
+        The guild has the heart badge.
+
+    .. attribute:: fire
+
+        The guild has the fire badge.
+
+    .. attribute:: compass
+
+        The guild has the compass badge.
+
+    .. attribute:: crosshairs
+
+        The guild has the crosshairs badge.
+
+    .. attribute:: flower
+
+        The guild has the flower badge.
+
+    .. attribute:: force
+
+        The guild has the force badge.
+
+    .. attribute:: gem
+
+        The guild has the gem badge.
+
+    .. attribute:: lava
+
+        The guild has the lava badge.
+
+    .. attribute:: psychic
+
+        The guild has the psychic badge.
+
+    .. attribute:: smoke
+
+        The guild has the smoke badge.
+
+    .. attribute:: snow
+
+        The guild has the snow badge.
+
+    .. attribute:: sound
+
+        The guild has the sound badge.
+
+    .. attribute:: sun
+
+        The guild has the sun badge.
+
+    .. attribute:: wind
+
+        The guild has the wind badge.
+
+    .. attribute:: bunny
+
+        The guild has the bunny badge.
+
+    .. attribute:: dog
+
+        The guild has the dog badge.
+
+    .. attribute:: frog
+
+        The guild has the frog badge.
+
+    .. attribute:: goat
+
+        The guild has the goat badge.
+
+    .. attribute:: cat
+
+        The guild has the cat badge.
+
+    .. attribute:: diamond
+
+        The guild has the diamond badge.
+
+    .. attribute:: crown
+
+        The guild has the crown badge.
+
+    .. attribute:: trophy
+
+        The guild has the trophy badge.
+
+    .. attribute:: money_bag
+
+        The guild has the money bag badge.
+
+    .. attribute:: dollar_sign
+
+        The guild has the dollar sign badge.
+
+.. class:: GuildVisibility
+
+    Represents the visibility level of a guild.
+
+    .. versionadded:: 2.2
+
+    .. attribute:: public
+
+        The guild is public and can be viewed by anyone.
+
+    .. attribute:: restricted
+
+        The guild is private and cannot be viewed. Joining requires an invite.
+
+    .. attribute:: public_with_recruitment
+
+        The guild is public and allows anyone to view it and submit a join request.
+
 
 .. _discord-api-audit-logs:
 
@@ -7173,6 +7841,14 @@ AuditLogDiff
         See also :attr:`Role.permissions`.
 
         :type: :class:`Permissions`
+
+    .. attribute:: application_command_permissions
+
+        A list of application command permission overwrites.
+
+        .. versionadded:: 2.2
+
+        :type: List[:class:`ApplicationCommandPermissions`]
 
     .. attribute:: colour
                    color
@@ -7748,16 +8424,10 @@ Messageable
 
 .. autoclass:: discord.abc.Messageable()
     :members:
-    :exclude-members: typing, slash_commands, user_commands
+    :exclude-members: typing
 
     .. automethod:: typing
         :async-with:
-
-    .. automethod:: slash_commands
-        :async-for:
-
-    .. automethod:: user_commands
-        :async-for:
 
 Connectable
 ~~~~~~~~~~~~
@@ -7815,16 +8485,10 @@ User
 .. autoclass:: User()
     :members:
     :inherited-members:
-    :exclude-members: typing, slash_commands, user_commands
+    :exclude-members: typing
 
     .. automethod:: typing
         :async-with:
-
-    .. automethod:: slash_commands
-        :async-for:
-
-    .. automethod:: user_commands
-        :async-for:
 
 .. attributetable:: UserProfile
 
@@ -7995,6 +8659,11 @@ Application
 .. autoclass:: PartialApplication()
     :members:
     :inherited-members:
+
+.. attributetable:: CommandApplication
+
+.. autoclass:: CommandApplication()
+    :members:
 
 .. attributetable:: ApplicationProfile
 
@@ -8345,6 +9014,7 @@ Guild
 .. autoclass:: MutualGuild()
     :members:
 
+
 .. class:: BanEntry
 
     A namedtuple which represents a ban returned from :meth:`~Guild.bans`.
@@ -8465,16 +9135,10 @@ Member
 .. autoclass:: Member()
     :members:
     :inherited-members:
-    :exclude-members: typing, slash_commands, user_commands
+    :exclude-members: typing
 
     .. automethod:: typing
         :async-with:
-
-    .. automethod:: slash_commands
-        :async-for:
-
-    .. automethod:: user_commands
-        :async-for:
 
 .. attributetable:: MemberProfile
 
@@ -8541,38 +9205,27 @@ GuildChannel
 .. autoclass:: CategoryChannel()
     :members:
     :inherited-members:
+    :exclude-members: category
 
 .. attributetable:: TextChannel
 
 .. autoclass:: TextChannel()
     :members:
     :inherited-members:
-    :exclude-members: typing, slash_commands, user_commands
+    :exclude-members: typing
 
     .. automethod:: typing
         :async-with:
-
-    .. automethod:: slash_commands
-        :async-for:
-
-    .. automethod:: user_commands
-        :async-for:
 
 .. attributetable:: VoiceChannel
 
 .. autoclass:: VoiceChannel()
     :members:
     :inherited-members:
-    :exclude-members: typing, slash_commands, user_commands
+    :exclude-members: typing
 
     .. automethod:: typing
         :async-with:
-
-    .. automethod:: slash_commands
-        :async-for:
-
-    .. automethod:: user_commands
-        :async-for:
 
 .. attributetable:: StageChannel
 
@@ -8600,32 +9253,20 @@ PrivateChannel
 .. autoclass:: DMChannel()
     :members:
     :inherited-members:
-    :exclude-members: typing, slash_commands, user_commands
+    :exclude-members: typing
 
     .. automethod:: typing
         :async-with:
-
-    .. automethod:: slash_commands
-        :async-for:
-
-    .. automethod:: user_commands
-        :async-for:
 
 .. attributetable:: GroupChannel
 
 .. autoclass:: GroupChannel()
     :members:
     :inherited-members:
-    :exclude-members: typing, slash_commands, user_commands
+    :exclude-members: typing
 
     .. automethod:: typing
         :async-with:
-
-    .. automethod:: slash_commands
-        :async-for:
-
-    .. automethod:: user_commands
-        :async-for:
 
 PartialMessageable
 ~~~~~~~~~~~~~~~~~~~
@@ -8644,16 +9285,10 @@ Thread
 .. autoclass:: Thread()
     :members:
     :inherited-members:
-    :exclude-members: typing, slash_commands, user_commands
+    :exclude-members: typing
 
     .. automethod:: typing
         :async-with:
-
-    .. automethod:: slash_commands
-        :async-for:
-
-    .. automethod:: user_commands
-        :async-for:
 
 .. attributetable:: ThreadMember
 
@@ -8695,10 +9330,6 @@ Message
 .. autoclass:: Message()
     :members:
     :inherited-members:
-    :exclude-members: message_commands
-
-    .. automethod:: message_commands
-        :async-for:
 
 .. attributetable:: PartialMessage
 
@@ -8764,6 +9395,11 @@ Modal
 .. autoclass:: Modal()
     :members:
 
+.. attributetable:: IFrameModal
+
+.. autoclass:: IFrameModal()
+    :members:
+
 Component
 ~~~~~~~~~~
 
@@ -8788,6 +9424,7 @@ Component
 .. autoclass:: SelectMenu()
     :members:
     :inherited-members:
+    :exclude-members: type
 
 .. attributetable:: SelectOption
 
@@ -8797,6 +9434,105 @@ Component
 .. attributetable:: TextInput
 
 .. autoclass:: TextInput()
+    :members:
+    :inherited-members:
+
+.. attributetable:: SelectDefaultValue
+
+.. autoclass:: SelectDefaultValue()
+    :members:
+    :exclude-members: type
+
+.. attributetable:: SectionComponent
+
+.. autoclass:: SectionComponent()
+    :members:
+    :inherited-members:
+
+.. attributetable:: TextDisplay
+
+.. autoclass:: TextDisplay()
+    :members:
+    :inherited-members:
+
+.. attributetable:: UnfurledMediaItem
+
+.. autoclass:: UnfurledMediaItem()
+    :members:
+
+.. attributetable:: ThumbnailComponent
+
+.. autoclass:: ThumbnailComponent()
+    :members:
+    :inherited-members:
+
+.. attributetable:: MediaGalleryItem
+
+.. autoclass:: MediaGalleryItem()
+    :members:
+    :exclude-members: media
+
+.. attributetable:: MediaGalleryComponent
+
+.. autoclass:: MediaGalleryComponent()
+    :members:
+    :inherited-members:
+
+.. attributetable:: FileComponent
+
+.. autoclass:: FileComponent()
+    :members:
+    :inherited-members:
+
+.. attributetable:: SeparatorComponent
+
+.. autoclass:: SeparatorComponent()
+    :members:
+    :inherited-members:
+
+.. attributetable:: Container
+
+.. autoclass:: Container()
+    :members:
+    :inherited-members:
+
+.. attributetable:: LabelComponent
+
+.. autoclass:: LabelComponent()
+    :members:
+    :inherited-members:
+
+.. attributetable:: FileUploadComponent
+
+.. autoclass:: FileUploadComponent()
+    :members:
+    :inherited-members:
+
+.. attributetable:: RadioGroupOption
+
+.. autoclass:: RadioGroupOption()
+    :members:
+
+.. attributetable:: RadioGroupComponent
+
+.. autoclass:: RadioGroupComponent()
+    :members:
+    :inherited-members:
+
+.. attributetable:: CheckboxGroupOption
+
+.. autoclass:: CheckboxGroupOption()
+    :members:
+
+.. attributetable:: CheckboxGroupComponent
+
+.. autoclass:: CheckboxGroupComponent()
+    :members:
+    :inherited-members:
+
+.. attributetable:: CheckboxComponent
+
+.. autoclass:: CheckboxComponent()
     :members:
     :inherited-members:
 
@@ -8814,6 +9550,14 @@ ApplicationCommand
 .. attributetable:: MessageCommand
 
 .. autoclass:: MessageCommand()
+    :members:
+    :inherited-members:
+
+    .. automethod:: __call__
+
+.. attributetable:: PrimaryEntryPointCommand
+
+.. autoclass:: PrimaryEntryPointCommand()
     :members:
     :inherited-members:
 
@@ -8843,6 +9587,31 @@ ApplicationCommand
 .. attributetable:: OptionChoice
 
 .. autoclass:: OptionChoice()
+    :members:
+
+.. attributetable:: AllChannels
+
+.. autoclass:: AllChannels()
+    :members:
+
+.. attributetable:: ApplicationCommandPermissions
+
+.. autoclass:: ApplicationCommandPermissions()
+    :members:
+
+.. attributetable:: GuildApplicationCommandPermissions
+
+.. autoclass:: GuildApplicationCommandPermissions()
+    :members:
+
+.. attributetable:: ApplicationCommandAutocompleteChoice
+
+.. autoclass:: ApplicationCommandAutocompleteChoice()
+    :members:
+
+.. attributetable:: ApplicationCommandAutocomplete
+
+.. autoclass:: ApplicationCommandAutocomplete()
     :members:
 
 Invite
@@ -8922,6 +9691,24 @@ Onboarding
 .. autoclass:: OnboardingPromptOption()
     :members:
 
+Member Verification
+~~~~~~~~~~~~~~~~~~~~
+
+.. attributetable:: MemberVerification
+
+.. autoclass:: MemberVerification()
+    :members:
+
+.. attributetable:: MemberVerificationFormField
+
+.. autoclass:: MemberVerificationFormField()
+    :members:
+
+.. attributetable:: JoinRequest
+
+.. autoclass:: JoinRequest()
+    :members:
+
 Tutorial
 ~~~~~~~~
 
@@ -8946,6 +9733,11 @@ RawEvent
 .. attributetable:: RawMessageUpdateEvent
 
 .. autoclass:: RawMessageUpdateEvent()
+    :members:
+
+.. attributetable:: RawJoinRequestDeleteEvent
+
+.. autoclass:: RawJoinRequestDeleteEvent()
     :members:
 
 .. attributetable:: RawPollVoteActionEvent
@@ -9241,6 +10033,16 @@ Flags
 .. autoclass:: ApplicationFlags()
     :members:
 
+.. attributetable:: ApplicationCommandContext
+
+.. autoclass:: ApplicationCommandContext()
+    :members:
+
+.. attributetable:: ApplicationIntegrationType
+
+.. autoclass:: ApplicationIntegrationType()
+    :members:
+
 .. attributetable:: ApplicationDiscoveryFlags
 
 .. autoclass:: ApplicationDiscoveryFlags()
@@ -9392,6 +10194,25 @@ Poll
     :members:
 
 
+Discovery
+~~~~~~~~~
+
+.. attributetable:: GuildProfile
+
+.. autoclass:: GuildProfile()
+    :members:
+
+.. attributetable:: GuildTrait
+
+.. autoclass:: GuildTrait()
+    :members:
+
+.. attributetable:: GameActivity
+
+.. autoclass:: GameActivity()
+    :members:
+
+
 Exceptions
 ------------
 
@@ -9430,6 +10251,8 @@ The following exceptions are thrown by the library.
 .. autoexception:: ConnectionClosed
     :members:
 
+.. autoexception:: FFmpegProcessError
+
 .. autoexception:: discord.opus.OpusError
 
 .. autoexception:: discord.opus.OpusNotLoaded
@@ -9445,6 +10268,7 @@ Exception Hierarchy
                 - :exc:`InvalidData`
                 - :exc:`LoginFailure`
                 - :exc:`ConnectionClosed`
+                - :exc:`FFmpegProcessError`
             - :exc:`GatewayNotFound`
             - :exc:`HTTPException`
                 - :exc:`Forbidden`

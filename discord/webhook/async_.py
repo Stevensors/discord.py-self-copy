@@ -73,6 +73,7 @@ if TYPE_CHECKING:
     from ..channel import VoiceChannel
     from ..abc import Snowflake
     from ..poll import Poll
+    from ..components import Component as ComponentObject
     from ..types.webhook import (
         Webhook as WebhookPayload,
         SourceGuild as SourceGuildPayload,
@@ -1077,6 +1078,9 @@ class Webhook(BaseWebhook):
 
         state = None
         if client is not MISSING:
+            if client._ready is MISSING:
+                raise ValueError('Client must be logged in to use from_url with a client')
+
             state = client._connection
             if session is MISSING:
                 session = client.http._HTTPClient__asession  # type: ignore
@@ -1384,6 +1388,7 @@ class Webhook(BaseWebhook):
         silent: bool = MISSING,
         applied_tags: List[ForumTag] = MISSING,
         poll: Poll = MISSING,
+        components: Sequence[ComponentObject] = MISSING,
     ) -> WebhookMessage: ...
 
     @overload
@@ -1406,6 +1411,7 @@ class Webhook(BaseWebhook):
         silent: bool = MISSING,
         applied_tags: List[ForumTag] = MISSING,
         poll: Poll = MISSING,
+        components: Sequence[ComponentObject] = MISSING,
     ) -> None: ...
 
     async def send(
@@ -1427,6 +1433,7 @@ class Webhook(BaseWebhook):
         silent: bool = False,
         applied_tags: List[ForumTag] = MISSING,
         poll: Poll = MISSING,
+        components: Sequence[ComponentObject] = MISSING,
     ) -> Optional[WebhookMessage]:
         """|coro|
 
@@ -1512,6 +1519,11 @@ class Webhook(BaseWebhook):
 
             .. versionadded:: 2.1
 
+        components: List[:class:`Component`]
+            The components to send with this message.
+
+            .. versionadded:: 2.2
+
         Raises
         --------
         HTTPException
@@ -1572,6 +1584,7 @@ class Webhook(BaseWebhook):
             previous_allowed_mentions=previous_mentions,
             applied_tags=applied_tag_ids,
             poll=poll,
+            components=components,
         ) as params:
             adapter = async_context.get()
             thread_id: Optional[int] = None
@@ -1660,6 +1673,7 @@ class Webhook(BaseWebhook):
         attachments: Sequence[Union[Attachment, File]] = MISSING,
         allowed_mentions: Optional[AllowedMentions] = None,
         thread: Snowflake = MISSING,
+        components: Sequence[ComponentObject] = MISSING,
     ) -> WebhookMessage:
         """|coro|
 
@@ -1701,6 +1715,11 @@ class Webhook(BaseWebhook):
 
             .. versionadded:: 2.0
 
+        components: List[:class:`Component`]
+            The components to replace the message components with.
+
+            .. versionadded:: 2.2
+
         Raises
         -------
         HTTPException
@@ -1731,6 +1750,7 @@ class Webhook(BaseWebhook):
             embeds=embeds,
             allowed_mentions=allowed_mentions,
             previous_allowed_mentions=previous_mentions,
+            components=components,
         ) as params:
             thread_id: Optional[int] = None
             if thread is not MISSING:

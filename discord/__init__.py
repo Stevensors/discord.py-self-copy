@@ -58,6 +58,7 @@ from .modal import *
 from .object import *
 from .oauth2 import *
 from .onboarding import *
+from .member_verification import *
 from .partial_emoji import *
 from .payments import *
 from .permissions import *
@@ -80,12 +81,15 @@ from .subscriptions import *
 from .team import *
 from .template import *
 from .threads import *
+from .tracking import *
 from .tutorial import *
 from .user import *
+from .stream import *
 from .voice_client import *
 from .webhook import *
 from .welcome_screen import *
 from .widget import *
+from .discovery import *
 
 
 class _VersionInfo(NamedTuple):

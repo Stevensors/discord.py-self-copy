@@ -30,9 +30,7 @@ import re
 import io
 from os import PathLike
 from typing import (
-    AsyncIterator,
     Dict,
-    Collection,
     TYPE_CHECKING,
     Literal,
     Sequence,
@@ -55,7 +53,6 @@ from .calls import CallMessage
 from .enums import (
     MessageType,
     ChannelType,
-    ApplicationCommandType,
     PurchaseNotificationType,
     MessageReferenceType,
     try_enum,
@@ -74,8 +71,6 @@ from .sticker import StickerItem, GuildSticker
 from .threads import Thread
 from .channel import PartialMessageable
 from .interactions import Interaction
-from .commands import MessageCommand
-from .abc import _handle_commands
 from .application import IntegrationApplication, PartialApplication
 from .poll import Poll
 
@@ -98,7 +93,7 @@ if TYPE_CHECKING:
 
     from .types.interactions import MessageInteraction as MessageInteractionPayload
 
-    from .types.components import MessageActionRow as ComponentPayload
+    from .types.components import Component as ComponentPayload
     from .types.threads import ThreadArchiveDuration
     from .types.member import (
         Member as MemberPayload,
@@ -109,7 +104,7 @@ if TYPE_CHECKING:
     from .types.gateway import MessageReactionRemoveEvent, MessageUpdateEvent
     from .abc import Snowflake
     from .abc import GuildChannel, MessageableChannel
-    from .components import ActionRow
+    from .components import Component
     from .file import _FileBase
     from .state import ConnectionState
     from .mentions import AllowedMentions
@@ -580,11 +575,11 @@ class MessageSnapshot(Hashable):
         self.flags: MessageFlags = MessageFlags._from_value(data.get('flags', 0))
         self.stickers: List[StickerItem] = [StickerItem(data=d, state=state) for d in data.get('sticker_items', [])]
 
-        self.components: List[ComponentPayload] = []
+        self.components: List[Component] = []
         for component_data in data.get('components', []):
             component = _component_factory(component_data)
             if component is not None:
-                self.components.append(component)  # type: ignore
+                self.components.append(component)
 
         self._state: ConnectionState = state
 
@@ -1989,7 +1984,7 @@ class Message(PartialMessage, Hashable):
         mentions: List[Union[User, Member]]
         author: Union[User, Member]
         role_mentions: List[Role]
-        components: List[ActionRow]
+        components: List[Component]
 
     def __init__(
         self,
@@ -2390,7 +2385,7 @@ class Message(PartialMessage, Hashable):
     def clean_content(self) -> str:
         """:class:`str`: A property that returns the content in a "cleaned up"
         manner. This basically means that mentions are transformed
-        into the way the client shows it. e.g. ``<#id>`` will transform
+        into the way the client shows them. e.g. ``<#id>`` will transform
         into ``#name``.
 
         This will also transform @everyone and @here mentions into
@@ -2708,7 +2703,7 @@ class Message(PartialMessage, Hashable):
         self,
         content: Optional[str] = MISSING,
         attachments: Sequence[Union[Attachment, _FileBase]] = MISSING,
-        suppress: bool = False,
+        suppress: bool = MISSING,
         delete_after: Optional[float] = None,
         allowed_mentions: Optional[AllowedMentions] = MISSING,
     ) -> Message:
@@ -2855,76 +2850,29 @@ class Message(PartialMessage, Hashable):
         """
         return await self.edit(attachments=[a for a in self.attachments if a not in attachments])
 
-    @utils.deprecated('Message.channel.application_commands')
-    def message_commands(
-        self,
-        query: Optional[str] = None,
-        *,
-        limit: Optional[int] = None,
-        command_ids: Optional[Collection[int]] = None,
-        application: Optional[Snowflake] = None,
-        with_applications: bool = True,
-    ) -> AsyncIterator[MessageCommand]:
-        """Returns a :term:`asynchronous iterator` of the message commands available to use on the message.
+    def is_forwardable(self) -> bool:
+        """:class:`bool`: Whether the message can be forwarded using :meth:`Message.forward`.
 
-        .. deprecated:: 2.1
+        A message is forwardable only if it is a basic message type and does not
+        contain a poll, call, or activity, and is not a system message.
 
-        Examples
-        ---------
-
-        Usage ::
-
-            async for command in message.message_commands():
-                print(command.name)
-
-        Flattening into a list ::
-
-            commands = [command async for command in message.message_commands()]
-            # commands is now a list of MessageCommand...
-
-        All parameters are optional.
-
-        Parameters
-        ----------
-        query: Optional[:class:`str`]
-            The query to search for. Specifying this limits results to 25 commands max.
-        limit: Optional[:class:`int`]
-            The maximum number of commands to send back. If ``None``, returns all commands.
-        command_ids: Optional[List[:class:`int`]]
-            List of up to 100 command IDs to search for. If the command doesn't exist, it won't be returned.
-
-            If ``limit`` is passed alongside this parameter, this parameter will serve as a "preferred commands" list.
-            This means that the endpoint will return the found commands + up to ``limit`` more, if available.
-        application: Optional[:class:`~discord.abc.Snowflake`]
-            Whether to return this application's commands. Always set to DM recipient in a private channel context.
-        with_applications: :class:`bool`
-            Whether to include applications in the response.
-
-        Raises
-        ------
-        TypeError
-            Both query and command_ids are passed.
-            Attempted to fetch commands in a DM with a non-bot user.
-        ValueError
-            The limit was not greater than or equal to 0.
-        HTTPException
-            Getting the commands failed.
-        ~discord.Forbidden
-            You do not have permissions to get the commands.
-        ~discord.HTTPException
-            The request to get the commands failed.
-
-        Yields
-        -------
-        :class:`.MessageCommand`
-            A message command.
+        .. versionadded:: 2.2
         """
-        return _handle_commands(
-            self,
-            ApplicationCommandType.message,
-            query=query,
-            limit=limit,
-            command_ids=command_ids,
-            application=application,
-            target=self,
-        )
+        if self.type not in (
+            MessageType.default,
+            MessageType.reply,
+            MessageType.chat_input_command,
+            MessageType.context_menu_command,
+        ):
+            return False
+
+        if self.poll is not None:
+            return False
+
+        if self.call is not None:
+            return False
+
+        if self.activity is not None:
+            return False
+
+        return True

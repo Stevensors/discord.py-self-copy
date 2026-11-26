@@ -38,10 +38,11 @@ from .entitlements import Entitlement, GatewayGift
 from .experiment import ApexExperimentResponse, GuildExperiment, UserExperiment
 from .guild import Guild, SupplementalGuild, UnavailableGuild
 from .integration import BaseIntegration, IntegrationApplication
-from .interactions import Modal
+from .interactions import IFrameModalSize, Modal
 from .invite import _InviteTargetType
 from .library import LibraryApplication
 from .member import MemberWithPresence, MemberWithUser
+from .member_verification import JoinRequest, JoinRequestStatus
 from .message import Message, ReactionType
 from .payments import Payment
 from .read_state import ReadState, ReadStateType
@@ -98,6 +99,7 @@ class ReadyEvent(ResumedEvent):
     geo_ordered_rtc_regions: List[str]
     guild_experiments: List[GuildExperiment]
     guilds: List[Guild]
+    guild_join_requests: List[JoinRequest]
     merged_members: List[List[MemberWithUser]]
     pending_payments: NotRequired[List[Payment]]
     private_channels: List[Union[DMChannel, GroupDMChannel]]
@@ -444,6 +446,34 @@ VoiceStateUpdateEvent = Union[GuildVoiceState, PrivateVoiceState]
 VoiceServerUpdateEvent = VoiceServerUpdate
 
 
+class StreamEvent(TypedDict):
+    stream_key: str
+    region: NotRequired[str]
+    viewer_ids: NotRequired[List[Snowflake]]
+    paused: NotRequired[bool]
+
+
+class StreamCreateEvent(StreamEvent):
+    rtc_server_id: Snowflake
+    rtc_channel_id: Snowflake
+
+
+class StreamServerUpdateEvent(TypedDict):
+    token: str
+    stream_key: str
+    endpoint: Optional[str]
+    guild_id: NotRequired[Optional[Snowflake]]
+
+
+class StreamDeleteEvent(TypedDict):
+    stream_key: str
+    reason: str
+    unavailable: NotRequired[bool]
+
+
+StreamUpdateEvent = StreamEvent
+
+
 class TypingStartEvent(TypedDict):
     channel_id: Snowflake
     user_id: Snowflake
@@ -599,6 +629,36 @@ class InteractionEvent(TypedDict):
     nonce: NotRequired[Snowflake]
 
 
+class InteractionFailureEvent(InteractionEvent):
+    reason_code: int
+
+
+class ApplicationCommandAutocompleteChoice(TypedDict):
+    name: str
+    value: Union[str, int, float]
+    name_localized: NotRequired[str]
+
+
+class ApplicationCommandAutocompleteEvent(TypedDict):
+    nonce: Snowflake
+    choices: List[ApplicationCommandAutocompleteChoice]
+
+
+class InteractionIframeModalCreateEvent(TypedDict):
+    id: Snowflake
+    channel_id: Snowflake
+    custom_id: str
+    application: IntegrationApplication
+    title: str
+    iframe_path: str
+    modal_size: IFrameModalSize
+    nonce: NotRequired[Snowflake]
+
+
+class InteractionIframeModalCloseEvent(TypedDict):
+    application_id: Snowflake
+
+
 InteractionModalCreateEvent = Modal
 
 
@@ -713,6 +773,21 @@ class PollVoteActionEvent(TypedDict):
     message_id: Snowflake
     guild_id: NotRequired[Snowflake]
     answer_id: int
+
+
+class GuildJoinRequestCreateEvent(TypedDict):
+    guild_id: Snowflake
+    request: JoinRequest
+    status: JoinRequestStatus
+
+
+GuildJoinRequestUpdateEvent = GuildJoinRequestCreateEvent
+
+
+class GuildJoinRequestDeleteEvent(TypedDict):
+    guild_id: Snowflake
+    id: Snowflake
+    user_id: Snowflake
 
 
 class DirectoryEntryEvent(DirectoryEntry):

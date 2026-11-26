@@ -37,6 +37,7 @@ extensions = [
     'sphinx.ext.intersphinx',
     'sphinx.ext.napoleon',
     'sphinxcontrib_trio',
+    'callable_class',
     'details',
     'exception_hierarchy',
     'attributetable',
@@ -180,6 +181,7 @@ html_context = {
     'discord_extensions': [
         ('discord.ext.commands', 'ext/commands'),
         ('discord.ext.tasks', 'ext/tasks'),
+        ('discord.ext.native_voice', 'https://discord-ext-native-voice.readthedocs.io/en/latest/'),
     ],
 }
 

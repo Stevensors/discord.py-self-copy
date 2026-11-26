@@ -32,7 +32,8 @@ __all__ = (
     'Enum',
     'ChannelType',
     'MessageType',
-    'SpeakingState',
+    'StreamType',
+    'StreamDeleteReason',
     'VerificationLevel',
     'ContentFilter',
     'Status',
@@ -62,9 +63,14 @@ __all__ = (
     'ComponentType',
     'ButtonStyle',
     'TextStyle',
+    'SelectDefaultValueType',
+    'SeparatorSpacing',
+    'MediaItemLoadingState',
     'GiftStyle',
     'PrivacyLevel',
     'InteractionType',
+    'InteractionFailureReason',
+    'IFrameModalSize',
     'NSFWLevel',
     'MFALevel',
     'Locale',
@@ -72,6 +78,10 @@ __all__ = (
     'EventStatus',
     'ApplicationCommandType',
     'AppCommandType',
+    'ApplicationCommandPermissionType',
+    'ApplicationCommandHandlerType',
+    'InteractionContextType',
+    'InteractionInstallationType',
     'ApplicationCommandOptionType',
     'AppCommandOptionType',
     'RelationshipType',
@@ -139,11 +149,15 @@ __all__ = (
     'StatusDisplayType',
     'OnboardingPromptType',
     'OnboardingMode',
+    'MemberVerificationFieldType',
+    'JoinRequestStatus',
     'CollectibleType',
     'NameplatePalette',
     'ExperimentPlatform',
     'ApexExperimentUnitType',
     'ApexExperimentSurface',
+    'GuildBadgeType',
+    'GuildVisibility',
 )
 
 
@@ -348,16 +362,25 @@ class MessageType(Enum):
         }
 
 
-class SpeakingState(Enum):
-    none = 0
-    voice = 1
-    soundshare = 2
-    priority = 4
+class StreamType(Enum):
+    guild = 'guild'
+    call = 'call'
+    test = 'test'
 
     def __str__(self) -> str:
-        return self.name
+        return self.value
 
-    def __int__(self) -> int:
+
+class StreamDeleteReason(Enum):
+    user_requested = 'user_requested'
+    stream_ended = 'stream_ended'
+    stream_full = 'stream_full'
+    unauthorized = 'unauthorized'
+    safety_guild_rate_limited = 'safety_guild_rate_limited'
+    parse_failed = 'parse_failed'
+    invalid_channel = 'invalid_channel'
+
+    def __str__(self) -> str:
         return self.value
 
 
@@ -573,6 +596,7 @@ class AuditLogAction(Enum):
     thread_create                                     = 110
     thread_update                                     = 111
     thread_delete                                     = 112
+    application_command_permission_update             = 121
     app_command_permission_update                     = 121
     automod_rule_create                               = 140
     automod_rule_update                               = 141
@@ -643,7 +667,7 @@ class AuditLogAction(Enum):
             AuditLogAction.thread_create:                            AuditLogActionCategory.create,
             AuditLogAction.thread_delete:                            AuditLogActionCategory.delete,
             AuditLogAction.thread_update:                            AuditLogActionCategory.update,
-            AuditLogAction.app_command_permission_update:            AuditLogActionCategory.update,
+            AuditLogAction.application_command_permission_update:    AuditLogActionCategory.update,
             AuditLogAction.automod_rule_create:                      AuditLogActionCategory.create,
             AuditLogAction.automod_rule_update:                      AuditLogActionCategory.update,
             AuditLogAction.automod_rule_delete:                      AuditLogActionCategory.delete,
@@ -698,7 +722,7 @@ class AuditLogAction(Enum):
         elif v < 113:
             return 'thread'
         elif v < 122:
-            return 'integration_or_app_command'
+            return 'integration_or_application_command'
         elif v < 143:
             return 'auto_moderation'
         elif v < 147:
@@ -986,6 +1010,41 @@ class InteractionType(Enum):
         return self.value
 
 
+class InteractionFailureReason(Enum):
+    unknown = 1
+    timeout = 2
+    activity_launch_unknown_application = 3
+    activity_launch_unknown_channel = 4
+    activity_launch_unknown_guild = 5
+    activity_launch_invalid_platform = 6
+    activity_launch_not_in_experiment = 7
+    activity_launch_invalid_channel_type = 8
+    activity_launch_invalid_channel_no_afk = 9
+    activity_launch_invalid_dev_preview_guild_size = 10
+    activity_launch_invalid_user_age_gate = 11
+    activity_launch_invalid_user_verification_level = 12
+    activity_launch_invalid_user_permissions = 13
+    activity_launch_invalid_configuration_not_embedded = 14
+    activity_launch_invalid_configuration_platform_not_supported = 15
+    activity_launch_invalid_configuration_platform_not_released = 16
+    activity_launch_failed_to_launch = 17
+    activity_launch_invalid_user_no_access_to_activity = 18
+    activity_launch_invalid_location_type = 19
+    activity_launch_invalid_user_region_for_application = 20
+
+    def __int__(self) -> int:
+        return self.value
+
+
+class IFrameModalSize(Enum):
+    small = 1
+    normal = 2
+    big = 3
+
+    def __int__(self) -> int:
+        return self.value
+
+
 class VideoQualityMode(Enum):
     auto = 1
     full = 2
@@ -998,7 +1057,24 @@ class ComponentType(Enum):
     action_row = 1
     button = 2
     select = 3
+    string_select = 3
     text_input = 4
+    user_select = 5
+    role_select = 6
+    mentionable_select = 7
+    channel_select = 8
+    section = 9
+    text_display = 10
+    thumbnail = 11
+    media_gallery = 12
+    file = 13
+    separator = 14
+    container = 17
+    label = 18
+    file_upload = 19
+    radio_group = 21
+    checkbox_group = 22
+    checkbox = 23
 
     def __int__(self) -> int:
         return self.value
@@ -1010,6 +1086,7 @@ class ButtonStyle(Enum):
     success = 3
     danger = 4
     link = 5
+    premium = 6
 
     # Aliases
     blurple = 1
@@ -1032,6 +1109,24 @@ class TextStyle(Enum):
 
     def __int__(self) -> int:
         return self.value
+
+
+class SelectDefaultValueType(Enum):
+    user = 'user'
+    role = 'role'
+    channel = 'channel'
+
+
+class SeparatorSpacing(Enum):
+    small = 1
+    large = 2
+
+
+class MediaItemLoadingState(Enum):
+    unknown = 0
+    loading = 1
+    loaded = 2
+    not_found = 3
 
 
 class GiftStyle(Enum):
@@ -1250,6 +1345,27 @@ class Locale(Enum):
     def language_code(self) -> str:
         return _UNICODE_LANG_MAP.get(self.value, self.value)
 
+    @property
+    def fallback(self) -> Optional[Locale]:
+        if self is Locale.american_english:
+            return Locale.british_english
+        elif self is Locale.british_english:
+            return Locale.american_english
+        elif self is Locale.latin_american_spanish:
+            return Locale.spain_spanish
+        elif self is Locale.spain_spanish:
+            # This one is technically not documented
+            # but it makes sense so I'm including it
+            return Locale.latin_american_spanish
+
+    def _resolve_from(self, locales: Dict[Locale, str]) -> Optional[str]:
+        if self in locales:
+            return locales[self]
+        fallback = self.fallback
+        if fallback is not None and fallback in locales:
+            return locales[fallback]
+        return None
+
 
 E = TypeVar('E', bound='Enum')
 
@@ -1293,12 +1409,35 @@ class ApplicationCommandType(Enum):
     chat_input = 1
     user = 2
     message = 3
+    primary_entry_point = 4
 
     def __int__(self) -> int:
         return self.value
 
 
 AppCommandType = ApplicationCommandType
+
+
+class ApplicationCommandPermissionType(Enum):
+    role = 1
+    user = 2
+    channel = 3
+
+
+class ApplicationCommandHandlerType(Enum):
+    app_handler = 1
+    discord_launch_activity = 2
+
+
+class InteractionContextType(Enum):
+    guild = 0
+    bot_dm = 1
+    private_channel = 2
+
+
+class InteractionInstallationType(Enum):
+    guild = 0
+    user = 1
 
 
 class ConnectionType(Enum):
@@ -1909,6 +2048,27 @@ class OnboardingMode(Enum):
     advanced = 1
 
 
+class MemberVerificationFieldType(Enum):
+    terms = 'TERMS'
+    text_input = 'TEXT_INPUT'
+    paragraph = 'PARAGRAPH'
+    multiple_choice = 'MULTIPLE_CHOICE'
+    # verification = 'VERIFICATION'  # dead
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class JoinRequestStatus(Enum):
+    started = 'STARTED'
+    submitted = 'SUBMITTED'
+    rejected = 'REJECTED'
+    approved = 'APPROVED'
+
+    def __str__(self) -> str:
+        return self.value
+
+
 class CollectibleType(Enum):
     nameplate = 'nameplate'
 
@@ -1947,6 +2107,52 @@ class ApexExperimentSurface(Enum):
     developer_portal = 3
     admin_panel = 4
     ads_budget_ab = 5
+
+    def __int__(self) -> int:
+        return self.value
+
+
+class GuildBadgeType(Enum):
+    sword = 0
+    water_drop = 1
+    skull = 2
+    toadstool = 3
+    moon = 4
+    lightning = 5
+    leaf = 6
+    heart = 7
+    fire = 8
+    compass = 9
+    crosshairs = 10
+    flower = 11
+    force = 12
+    gem = 13
+    lava = 14
+    psychic = 15
+    smoke = 16
+    snow = 17
+    sound = 18
+    sun = 19
+    wind = 20
+    bunny = 21
+    dog = 22
+    frog = 23
+    goat = 24
+    cat = 25
+    diamond = 26
+    crown = 27
+    trophy = 28
+    money_bag = 29
+    dollar_sign = 30
+
+    def __int__(self) -> int:
+        return self.value
+
+
+class GuildVisibility(Enum):
+    public = 1
+    restricted = 2
+    public_with_recruitment = 3
 
     def __int__(self) -> int:
         return self.value
